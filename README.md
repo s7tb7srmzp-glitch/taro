@@ -22,11 +22,13 @@ npm run dev
 - 리딩 저장/불러오기 (브라우저 localStorage)
 - 인쇄 (`window.print()` 기반 전용 레이아웃)
 
-## 카드 이미지 교체
+## 카드 이미지
 
-`src/data/cards.ts`의 각 카드는 `imagePath`로 `/cards/{id}.jpg` 형태의 경로를 가리킵니다.
-`public/cards/` 아래에 같은 파일명으로 실제 카드 이미지를 넣으면 자동으로 그 이미지가 쓰이고,
-없으면 이름/숫자 기반의 생성된 카드 얼굴이 대신 표시됩니다.
+`public/cards/`에 라이더-웨이트-스미스 덱 78장 실제 이미지가 이미 들어있습니다
+(`major-00.jpg` ~ `major-21.jpg`, `court-{suit}-{rank}.jpg`, `pip-{suit}-{01~10}.jpg`).
+`src/data/cards.ts`의 각 카드는 이 규칙으로 `imagePath`를 가리키며, 만약 해당 경로에 파일이
+없으면 이름/숫자 기반의 생성된 카드 얼굴이 대신 표시됩니다. 다른 이미지로 바꾸고 싶으면 같은
+파일명 규칙으로 `public/cards/`의 파일을 교체하면 됩니다.
 
 ## 기술 스택
 
