@@ -5,10 +5,12 @@ import { SpreadBoard } from "./components/SpreadBoard";
 import { CardPickerPanel } from "./components/CardPickerPanel";
 import { InterpretationPanel } from "./components/InterpretationPanel";
 import { ReadingList } from "./components/ReadingList";
+import { SettingsPanel } from "./components/SettingsPanel";
 import { SPREADS_BY_ID } from "./data/spreads";
 import type { Reading, SessionInfo } from "./lib/types";
 import { listReadings, saveReading, deleteReading } from "./lib/storage";
 import { requestInterpretation } from "./lib/ai";
+import { hasApiKey } from "./lib/settings";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -40,6 +42,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyPresent, setApiKeyPresent] = useState(() => hasApiKey());
 
   const spread = spreadId ? SPREADS_BY_ID[spreadId] : null;
 
@@ -47,10 +51,23 @@ export default function App() {
 
   const canStart = session.question.trim().length > 0 && !!spreadId;
 
-  const canInterpret = useMemo(() => {
+  const allSlotsFilled = useMemo(() => {
     if (!spread) return false;
     return spread.positions.every((p) => p.optional || placements[p.id]);
   }, [spread, placements]);
+
+  const canInterpret = allSlotsFilled && apiKeyPresent;
+
+  const interpretHint = !allSlotsFilled
+    ? "모든 칸에 카드를 배치하면 AI 해석을 받을 수 있어요."
+    : !apiKeyPresent
+      ? "설정에서 Anthropic API 키를 먼저 등록해주세요."
+      : undefined;
+
+  function handleCloseSettings() {
+    setShowSettings(false);
+    setApiKeyPresent(hasApiKey());
+  }
 
   function refreshReadings() {
     setReadings(listReadings());
@@ -156,6 +173,11 @@ export default function App() {
         <header className="app-header no-print">
           <h1>타로 리딩</h1>
           <p>스프레드를 선택하고, 카드를 직접 골라 배치해보세요.</p>
+          <div className="app-header__actions">
+            <button type="button" className="btn btn--ghost" onClick={() => setShowSettings(true)}>
+              {apiKeyPresent ? "설정" : "AI 설정 필요"}
+            </button>
+          </div>
         </header>
 
         <section className="setup-section">
@@ -176,6 +198,8 @@ export default function App() {
           <h2>저장된 리딩</h2>
           <ReadingList readings={readings} onOpen={openReading} onDelete={handleDeleteReading} />
         </section>
+
+        {showSettings && <SettingsPanel onClose={handleCloseSettings} />}
       </div>
     );
   }
@@ -187,6 +211,11 @@ export default function App() {
           ‹ 처음으로
         </button>
         <h1>타로 리딩</h1>
+        <div className="app-header__actions">
+          <button type="button" className="btn btn--ghost" onClick={() => setShowSettings(true)}>
+            설정
+          </button>
+        </div>
       </header>
 
       <div className="reading-summary print-only">
@@ -217,7 +246,10 @@ export default function App() {
         onPrint={handlePrint}
         saved={saved}
         canInterpret={canInterpret}
+        hint={interpretHint}
       />
+
+      {showSettings && <SettingsPanel onClose={handleCloseSettings} />}
 
       {activePosition && (
         <CardPickerPanel

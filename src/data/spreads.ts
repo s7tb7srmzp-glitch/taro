@@ -178,8 +178,8 @@ export const SPREADS: SpreadTemplate[] = [
     summary: "종합적인 심층 리딩을 위한 정통 10장 배열.",
     boardAspect: 1.25,
     positions: [
-      { id: "present", label: "현재 상황", x: 30, y: 50 },
-      { id: "challenge", label: "장애 / 도움", x: 36, y: 50, rotation: 90 },
+      { id: "present", label: "현재 상황", x: 30, y: 45 },
+      { id: "challenge", label: "장애 / 도움", x: 30, y: 58, rotation: 90 },
       { id: "unconscious", label: "무의식 (모르고 있는 것)", x: 30, y: 85 },
       { id: "past", label: "과거", x: 8, y: 50 },
       { id: "conscious", label: "의식 (알고 있는 것)", x: 30, y: 15 },

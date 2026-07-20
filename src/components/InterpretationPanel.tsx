@@ -7,6 +7,7 @@ interface InterpretationPanelProps {
   onPrint: () => void;
   saved: boolean;
   canInterpret: boolean;
+  hint?: string;
 }
 
 export function InterpretationPanel({
@@ -18,6 +19,7 @@ export function InterpretationPanel({
   onPrint,
   saved,
   canInterpret,
+  hint,
 }: InterpretationPanelProps) {
   return (
     <div className="interpretation-panel">
@@ -38,9 +40,7 @@ export function InterpretationPanel({
         </button>
       </div>
 
-      {!canInterpret && (
-        <p className="interpretation-panel__hint">모든 칸에 카드를 배치하면 AI 해석을 받을 수 있어요.</p>
-      )}
+      {hint && <p className="interpretation-panel__hint">{hint}</p>}
 
       {error && <p className="interpretation-panel__error">{error}</p>}
 

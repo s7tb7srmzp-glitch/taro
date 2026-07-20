@@ -11,15 +11,15 @@
 }
 
 .card-face--sm {
-  width: 64px;
+  width: clamp(40px, 11vw, 64px);
 }
 
 .card-face--md {
-  width: 108px;
+  width: clamp(58px, 17vw, 108px);
 }
 
 .card-face--lg {
-  width: 160px;
+  width: clamp(84px, 26vw, 160px);
 }
 
 .card-face__img {

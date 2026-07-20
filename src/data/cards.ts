@@ -66,13 +66,15 @@ const PIP_NUMBER_NAMES: [string, string][] = [
   ["10", "Ten"],
 ];
 
+const CARDS_BASE = `${import.meta.env.BASE_URL}cards/`;
+
 const majorCards: CardDef[] = MAJOR_NAMES.map(([nameKo, nameEn], number) => ({
   id: `major-${String(number).padStart(2, "0")}`,
   nameKo: `${number}. ${nameKo}`,
   nameEn,
   arcana: "major",
   number,
-  imagePath: `/cards/major-${String(number).padStart(2, "0")}.jpg`,
+  imagePath: `${CARDS_BASE}major-${String(number).padStart(2, "0")}.jpg`,
 }));
 
 const courtCards: CardDef[] = SUITS.flatMap(({ suit, nameKo: suitKo, nameEn: suitEn }) =>
@@ -83,7 +85,7 @@ const courtCards: CardDef[] = SUITS.flatMap(({ suit, nameKo: suitKo, nameEn: sui
     arcana: "court" as Arcana,
     suit,
     rank,
-    imagePath: `/cards/court-${suit}-${rank}.jpg`,
+    imagePath: `${CARDS_BASE}court-${suit}-${rank}.jpg`,
   })),
 );
 
@@ -95,7 +97,7 @@ const pipCards: CardDef[] = SUITS.flatMap(({ suit, nameKo: suitKo, nameEn: suitE
     arcana: "pip" as Arcana,
     suit,
     number: idx + 1,
-    imagePath: `/cards/pip-${suit}-${String(idx + 1).padStart(2, "0")}.jpg`,
+    imagePath: `${CARDS_BASE}pip-${suit}-${String(idx + 1).padStart(2, "0")}.jpg`,
   })),
 );
 
