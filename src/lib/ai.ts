@@ -45,39 +45,52 @@ export async function requestInterpretation(reading: Reading): Promise<string> {
       return { position: p.label, card: card?.nameKo ?? "?" };
     });
 
-  const prompt = buildPrompt(reading, spread.name, cards);
+  type ChatMessage = { role: "user" | "assistant"; content: string };
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: ANTHROPIC_MODEL,
-      max_tokens: 2048,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  async function callClaude(messages: ChatMessage[]): Promise<{ text: string; truncated: boolean }> {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 4096,
+        messages,
+      }),
+    });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    if (res.status === 401) {
-      throw new Error("API 키가 올바르지 않습니다. 설정에서 키를 다시 확인해주세요.");
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      if (res.status === 401) {
+        throw new Error("API 키가 올바르지 않습니다. 설정에서 키를 다시 확인해주세요.");
+      }
+      throw new Error(`해석 요청 실패 (${res.status}): ${text.slice(0, 200)}`);
     }
-    throw new Error(`해석 요청 실패 (${res.status}): ${text.slice(0, 200)}`);
+
+    const data = (await res.json()) as {
+      content?: { type: string; text?: string }[];
+      stop_reason?: string;
+    };
+    const text = data.content?.find((b) => b.type === "text")?.text;
+    if (!text) throw new Error("Claude 응답에서 해석 텍스트를 찾지 못했습니다.");
+    return { text, truncated: data.stop_reason === "max_tokens" };
   }
 
-  const data = (await res.json()) as {
-    content?: { type: string; text?: string }[];
-    stop_reason?: string;
-  };
-  const text = data.content?.find((b) => b.type === "text")?.text;
-  if (!text) throw new Error("Claude 응답에서 해석 텍스트를 찾지 못했습니다.");
-  if (data.stop_reason === "max_tokens") {
-    return `${text}\n\n(※ 답변이 길어져 여기서 잘렸어요. 필요하면 다시 해석해보세요.)`;
+  const prompt = buildPrompt(reading, spread.name, cards);
+  const messages: ChatMessage[] = [{ role: "user", content: prompt }];
+  let fullText = "";
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { text, truncated } = await callClaude(messages);
+    fullText += text;
+    if (!truncated) break;
+    messages.push({ role: "assistant", content: text });
+    messages.push({ role: "user", content: "이어서 계속 써주세요." });
   }
-  return text;
+
+  return fullText;
 }
