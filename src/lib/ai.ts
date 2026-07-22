@@ -57,7 +57,7 @@ export async function requestInterpretation(reading: Reading): Promise<string> {
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -70,8 +70,14 @@ export async function requestInterpretation(reading: Reading): Promise<string> {
     throw new Error(`해석 요청 실패 (${res.status}): ${text.slice(0, 200)}`);
   }
 
-  const data = (await res.json()) as { content?: { type: string; text?: string }[] };
+  const data = (await res.json()) as {
+    content?: { type: string; text?: string }[];
+    stop_reason?: string;
+  };
   const text = data.content?.find((b) => b.type === "text")?.text;
   if (!text) throw new Error("Claude 응답에서 해석 텍스트를 찾지 못했습니다.");
+  if (data.stop_reason === "max_tokens") {
+    return `${text}\n\n(※ 답변이 길어져 여기서 잘렸어요. 필요하면 다시 해석해보세요.)`;
+  }
   return text;
 }
