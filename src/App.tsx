@@ -4,12 +4,14 @@ import { SpreadPicker } from "./components/SpreadPicker";
 import { SpreadBoard } from "./components/SpreadBoard";
 import { CardPickerPanel } from "./components/CardPickerPanel";
 import { InterpretationPanel } from "./components/InterpretationPanel";
+import { FollowUpThread } from "./components/FollowUpThread";
+import { CommentBox } from "./components/CommentBox";
 import { ReadingList } from "./components/ReadingList";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SPREADS_BY_ID } from "./data/spreads";
-import type { Reading, SessionInfo } from "./lib/types";
+import type { FollowUp, Reading, SessionInfo } from "./lib/types";
 import { listReadings, saveReading, deleteReading } from "./lib/storage";
-import { requestInterpretation } from "./lib/ai";
+import { requestInterpretation, requestFollowUp } from "./lib/ai";
 import { hasApiKey } from "./lib/settings";
 
 function todayIso(): string {
@@ -39,6 +41,8 @@ export default function App() {
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
 
   const [interpretation, setInterpretation] = useState<string | null>(null);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [userComment, setUserComment] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -79,6 +83,8 @@ export default function App() {
     setSpreadId(null);
     setPlacements({});
     setInterpretation(null);
+    setFollowUps([]);
+    setUserComment("");
     setError(null);
     setSaved(false);
     setStep("setup");
@@ -90,6 +96,8 @@ export default function App() {
     setSpreadId(reading.spreadId);
     setPlacements(reading.placements);
     setInterpretation(reading.interpretation ?? null);
+    setFollowUps(reading.followUps ?? []);
+    setUserComment(reading.userComment ?? "");
     setError(null);
     setSaved(true);
     setStep("board");
@@ -104,6 +112,8 @@ export default function App() {
     if (!canStart) return;
     setPlacements({});
     setInterpretation(null);
+    setFollowUps([]);
+    setUserComment("");
     setSaved(false);
     setStep("board");
   }
@@ -137,6 +147,8 @@ export default function App() {
       spreadId: spreadId!,
       placements,
       interpretation: interpretation ?? undefined,
+      followUps,
+      userComment: userComment || undefined,
       createdAt: new Date().toISOString(),
     };
   }
@@ -147,12 +159,19 @@ export default function App() {
     try {
       const text = await requestInterpretation(buildReading());
       setInterpretation(text);
+      setFollowUps([]);
       setSaved(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "해석 중 오류가 발생했습니다.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleAskFollowUp(question: string) {
+    const answer = await requestFollowUp(buildReading(), question);
+    setFollowUps((prev) => [...prev, { question, answer }]);
+    setSaved(false);
   }
 
   function handleSave() {
@@ -248,6 +267,10 @@ export default function App() {
         canInterpret={canInterpret}
         hint={interpretHint}
       />
+
+      {interpretation && <FollowUpThread followUps={followUps} onAsk={handleAskFollowUp} />}
+
+      <CommentBox value={userComment} onChange={(v) => { setUserComment(v); setSaved(false); }} />
 
       {showSettings && <SettingsPanel onClose={handleCloseSettings} />}
 

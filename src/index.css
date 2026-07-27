@@ -468,6 +468,99 @@ h2 {
   margin: 0;
 }
 
+/* ---------- follow-up thread ---------- */
+.followup-thread {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.followup-thread h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.followup-thread__history {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.followup-thread__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.followup-thread__question {
+  margin: 0;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.followup-thread__answer {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  opacity: 0.92;
+}
+
+.followup-thread__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.followup-thread__composer textarea {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f4e9d8;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.followup-thread__composer .btn {
+  align-self: flex-end;
+}
+
+/* ---------- comment box ---------- */
+.comment-box {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comment-box h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.comment-box__textarea {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f4e9d8;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.comment-box__print {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  margin: 0;
+}
+
 /* ---------- mobile ---------- */
 @media (max-width: 640px) {
   .app-shell {
@@ -533,10 +626,18 @@ h2 {
 
   .setup-section,
   .reading-summary,
-  .interpretation-panel {
+  .interpretation-panel,
+  .followup-thread,
+  .comment-box {
     background: none;
     border: none;
     padding: 0;
+  }
+
+  .followup-thread__question,
+  .followup-thread__answer,
+  .comment-box__print {
+    color: #111;
   }
 
   .spread-board {

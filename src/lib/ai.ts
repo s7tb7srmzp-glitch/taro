@@ -4,8 +4,16 @@ import { CARDS_BY_ID } from "../data/cards";
 import { getApiKey } from "./settings";
 
 const ANTHROPIC_MODEL = "claude-sonnet-5";
+const NO_MARKDOWN_NOTE =
+  "(마크다운 문법(#, *, -, --- 등)을 쓰지 말고, 일반 텍스트와 줄바꿈만 사용해서 답해주세요.)";
 
-function buildPrompt(reading: Reading, spreadName: string, cards: { position: string; card: string }[]): string {
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+function buildInterpretationPrompt(
+  reading: Reading,
+  spreadName: string,
+  cards: { position: string; card: string }[],
+): string {
   const cardLines = cards.map((c) => `- ${c.position}: ${c.card}`).join("\n");
 
   return [
@@ -29,14 +37,71 @@ function buildPrompt(reading: Reading, spreadName: string, cards: { position: st
   ].join("\n");
 }
 
-export async function requestInterpretation(reading: Reading): Promise<string> {
-  const spread = SPREADS_BY_ID[reading.spreadId];
-  if (!spread) throw new Error("알 수 없는 스프레드입니다.");
+async function callClaude(
+  apiKey: string,
+  messages: ChatMessage[],
+): Promise<{ text: string; truncated: boolean }> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 4096,
+      messages,
+    }),
+  });
 
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    if (res.status === 401) {
+      throw new Error("API 키가 올바르지 않습니다. 설정에서 키를 다시 확인해주세요.");
+    }
+    throw new Error(`요청 실패 (${res.status}): ${text.slice(0, 200)}`);
+  }
+
+  const data = (await res.json()) as {
+    content?: { type: string; text?: string }[];
+    stop_reason?: string;
+  };
+  const text = data.content?.find((b) => b.type === "text")?.text;
+  if (!text) throw new Error("Claude 응답에서 텍스트를 찾지 못했습니다.");
+  return { text, truncated: data.stop_reason === "max_tokens" };
+}
+
+/** Runs the conversation, automatically asking Claude to continue if a reply gets cut off by max_tokens. */
+async function runToCompletion(apiKey: string, messages: ChatMessage[]): Promise<string> {
+  const working = [...messages];
+  let fullText = "";
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { text, truncated } = await callClaude(apiKey, working);
+    fullText += text;
+    if (!truncated) break;
+    working.push({ role: "assistant", content: text });
+    working.push({ role: "user", content: "이어서 계속 써주세요." });
+  }
+
+  return fullText;
+}
+
+function requireApiKey(): string {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error("API 키가 설정되어 있지 않습니다. 설정에서 Anthropic API 키를 먼저 등록해주세요.");
   }
+  return apiKey;
+}
+
+export async function requestInterpretation(reading: Reading): Promise<string> {
+  const spread = SPREADS_BY_ID[reading.spreadId];
+  if (!spread) throw new Error("알 수 없는 스프레드입니다.");
+
+  const apiKey = requireApiKey();
 
   const cards = spread.positions
     .filter((p) => reading.placements[p.id])
@@ -45,52 +110,37 @@ export async function requestInterpretation(reading: Reading): Promise<string> {
       return { position: p.label, card: card?.nameKo ?? "?" };
     });
 
-  type ChatMessage = { role: "user" | "assistant"; content: string };
+  const prompt = buildInterpretationPrompt(reading, spread.name, cards);
+  return runToCompletion(apiKey, [{ role: "user", content: prompt }]);
+}
 
-  async function callClaude(messages: ChatMessage[]): Promise<{ text: string; truncated: boolean }> {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 4096,
-        messages,
-      }),
+/** Builds the full conversation so far (original reading + interpretation + prior follow-ups) so a new
+ * follow-up question is answered with the same context Claude used originally. */
+export async function requestFollowUp(reading: Reading, question: string): Promise<string> {
+  const spread = SPREADS_BY_ID[reading.spreadId];
+  if (!spread) throw new Error("알 수 없는 스프레드입니다.");
+  if (!reading.interpretation) throw new Error("먼저 AI 해석을 받은 뒤에 추가 질문을 할 수 있어요.");
+
+  const apiKey = requireApiKey();
+
+  const cards = spread.positions
+    .filter((p) => reading.placements[p.id])
+    .map((p) => {
+      const card = CARDS_BY_ID[reading.placements[p.id]];
+      return { position: p.label, card: card?.nameKo ?? "?" };
     });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      if (res.status === 401) {
-        throw new Error("API 키가 올바르지 않습니다. 설정에서 키를 다시 확인해주세요.");
-      }
-      throw new Error(`해석 요청 실패 (${res.status}): ${text.slice(0, 200)}`);
-    }
+  const messages: ChatMessage[] = [
+    { role: "user", content: buildInterpretationPrompt(reading, spread.name, cards) },
+    { role: "assistant", content: reading.interpretation },
+  ];
 
-    const data = (await res.json()) as {
-      content?: { type: string; text?: string }[];
-      stop_reason?: string;
-    };
-    const text = data.content?.find((b) => b.type === "text")?.text;
-    if (!text) throw new Error("Claude 응답에서 해석 텍스트를 찾지 못했습니다.");
-    return { text, truncated: data.stop_reason === "max_tokens" };
+  for (const followUp of reading.followUps ?? []) {
+    messages.push({ role: "user", content: followUp.question });
+    messages.push({ role: "assistant", content: followUp.answer });
   }
 
-  const prompt = buildPrompt(reading, spread.name, cards);
-  const messages: ChatMessage[] = [{ role: "user", content: prompt }];
-  let fullText = "";
+  messages.push({ role: "user", content: `${question}\n\n${NO_MARKDOWN_NOTE}` });
 
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { text, truncated } = await callClaude(messages);
-    fullText += text;
-    if (!truncated) break;
-    messages.push({ role: "assistant", content: text });
-    messages.push({ role: "user", content: "이어서 계속 써주세요." });
-  }
-
-  return fullText;
+  return runToCompletion(apiKey, messages);
 }

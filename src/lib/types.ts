@@ -5,6 +5,11 @@ export interface SessionInfo {
   date: string;
 }
 
+export interface FollowUp {
+  question: string;
+  answer: string;
+}
+
 export interface Reading {
   id: string;
   session: SessionInfo;
@@ -12,5 +17,9 @@ export interface Reading {
   /** positionId -> cardId */
   placements: Record<string, string>;
   interpretation?: string;
+  /** Follow-up Q&A asked about the interpretation, in order. */
+  followUps?: FollowUp[];
+  /** Free-text note the user writes themselves, separate from the AI interpretation. */
+  userComment?: string;
   createdAt: string;
 }
