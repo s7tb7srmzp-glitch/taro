@@ -7,6 +7,7 @@ import { InterpretationPanel } from "./components/InterpretationPanel";
 import { FollowUpThread } from "./components/FollowUpThread";
 import { CommentBox } from "./components/CommentBox";
 import { ReadingList } from "./components/ReadingList";
+import { BackupPanel } from "./components/BackupPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { SPREADS_BY_ID } from "./data/spreads";
 import type { FollowUp, Reading, SessionInfo } from "./lib/types";
@@ -216,6 +217,7 @@ export default function App() {
         <section className="setup-section">
           <h2>저장된 리딩</h2>
           <ReadingList readings={readings} onOpen={openReading} onDelete={handleDeleteReading} />
+          <BackupPanel onImported={refreshReadings} />
         </section>
 
         {showSettings && <SettingsPanel onClose={handleCloseSettings} />}

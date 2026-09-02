@@ -231,6 +231,37 @@ h2 {
   font-size: 0.9rem;
 }
 
+/* ---------- backup panel ---------- */
+.backup-panel {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(244, 233, 216, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.backup-panel__desc {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.backup-panel__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.backup-panel__status {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.backup-panel__status--error {
+  color: #ff9a9a;
+}
+
 /* ---------- board screen ---------- */
 .reading-summary {
   background: rgba(0, 0, 0, 0.2);
