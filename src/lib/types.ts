@@ -48,6 +48,15 @@ export interface CallExtraCard {
   note?: string;
 }
 
+/** One live exchange in a call: the client's remark (or an extra card draw) and the reply to read aloud. */
+export interface CallReaction extends FollowUp {
+  /** Short study note on why the reply was given — not read aloud. */
+  rationale?: string;
+  /** Present when the reply corrects an earlier interpretation in light of new facts. */
+  revision?: string;
+  kind?: "reaction" | "extra-card";
+}
+
 export interface CallSession {
   id: string;
   session: SessionInfo;
@@ -56,7 +65,16 @@ export interface CallSession {
   placements: Record<string, string>;
   script?: CallScript;
   /** Client reactions/questions asked live and the short replies given, in order. */
-  reactions?: FollowUp[];
+  reactions?: CallReaction[];
   extraCards?: CallExtraCard[];
+  /** Facts the client confirmed during the call, carried into every later reply. */
+  facts?: string[];
   createdAt: string;
+}
+
+export interface CallReply {
+  answer: string;
+  rationale: string;
+  revision: string;
+  newFacts: string[];
 }

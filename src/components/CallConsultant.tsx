@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SessionForm } from "./SessionForm";
 import { SpreadPicker } from "./SpreadPicker";
 import { SpreadBoard } from "./SpreadBoard";
@@ -6,10 +6,12 @@ import { CardPickerPanel } from "./CardPickerPanel";
 import { CallScriptPanel } from "./CallScriptPanel";
 import { CallReactionThread } from "./CallReactionThread";
 import { CallExtraCardPicker } from "./CallExtraCardPicker";
+import { CallCardStrip } from "./CallCardStrip";
+import { CallScriptTabs } from "./CallScriptTabs";
 import { SettingsPanel } from "./SettingsPanel";
 import { SPREADS_BY_ID } from "../data/spreads";
 import { CARDS_BY_ID } from "../data/cards";
-import type { CallExtraCard, CallScript, CallSession, SessionInfo } from "../lib/types";
+import type { CallExtraCard, CallReaction, CallReply, CallScript, CallSession, SessionInfo } from "../lib/types";
 import {
   listCallSessions,
   saveCallSession,
@@ -28,6 +30,16 @@ function newId(prefix: string): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** Rough spoken length for Korean at ~5 syllables per second. */
+function estimateSpeechSeconds(text: string): number {
+  return Math.max(1, Math.round(text.replace(/\s/g, "").length / 5));
+}
+
+function mergeFacts(existing: string[], incoming: string[]): string[] {
+  const seen = new Set(existing);
+  return [...existing, ...incoming.filter((f) => !seen.has(f))];
 }
 
 type CallStep = "setup" | "live";
@@ -51,8 +63,10 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   const [activeSlotId, setActiveSlotId] = useState<string | null>(null);
 
   const [script, setScript] = useState<CallScript | null>(null);
-  const [reactions, setReactions] = useState<CallSession["reactions"]>([]);
+  const [reactions, setReactions] = useState<CallReaction[]>([]);
   const [extraCards, setExtraCards] = useState<CallExtraCard[]>([]);
+  const [facts, setFacts] = useState<string[]>([]);
+  const [confirmRegen, setConfirmRegen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -64,7 +78,10 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const spread = spreadId ? SPREADS_BY_ID[spreadId] : null;
-  const usedCardIds = useMemo(() => new Set(Object.values(placements)), [placements]);
+  const usedCardIds = useMemo(
+    () => new Set([...Object.values(placements), ...extraCards.map((x) => x.cardId)]),
+    [placements, extraCards],
+  );
   const canStart = session.question.trim().length > 0 && !!spreadId;
 
   const allSlotsFilled = useMemo(() => {
@@ -74,10 +91,16 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
 
   const canGenerate = allSlotsFilled && apiKeyPresent;
   const generateHint = !allSlotsFilled
-    ? "모든 칸에 카드를 배치하면 스크립트를 생성할 수 있어요."
+    ? "모든 칸에 카드를 배치하면 대본을 생성할 수 있어요."
     : !apiKeyPresent
       ? "설정에서 Anthropic API 키를 먼저 등록해주세요."
       : undefined;
+
+  useEffect(() => {
+    if (!confirmRegen) return;
+    const timer = setTimeout(() => setConfirmRegen(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmRegen]);
 
   function handleCloseSettings() {
     setShowSettings(false);
@@ -96,6 +119,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setScript(null);
     setReactions([]);
     setExtraCards([]);
+    setFacts([]);
     setError(null);
     setSaved(false);
     setStep("setup");
@@ -109,6 +133,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setScript(s.script ?? null);
     setReactions(s.reactions ?? []);
     setExtraCards(s.extraCards ?? []);
+    setFacts(s.facts ?? []);
     setError(null);
     setSaved(true);
     setStep("live");
@@ -125,6 +150,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setScript(null);
     setReactions([]);
     setExtraCards([]);
+    setFacts([]);
     setSaved(false);
     setStep("live");
   }
@@ -160,11 +186,13 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       script: script ?? undefined,
       reactions,
       extraCards,
+      facts,
       createdAt: new Date().toISOString(),
     };
   }
 
   async function handleGenerateScript() {
+    setConfirmRegen(false);
     setLoading(true);
     setError(null);
     try {
@@ -174,24 +202,44 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       setExtraCards([]);
       setSaved(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "스크립트 생성 중 오류가 발생했습니다.");
+      setError(e instanceof Error ? e.message : "대본 생성 중 오류가 발생했어요.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleAskReaction(reaction: string) {
-    const answer = await requestCallFollowUp(buildSession(), reaction);
-    setReactions((prev) => [...(prev ?? []), { question: reaction, answer }]);
+  function handleRegenerateClick() {
+    if (reactions.length === 0 || confirmRegen) {
+      handleGenerateScript();
+    } else {
+      setConfirmRegen(true);
+    }
+  }
+
+  function recordReply(question: string, reply: CallReply, kind: CallReaction["kind"]) {
+    setReactions((prev) => [
+      ...prev,
+      { question, answer: reply.answer, rationale: reply.rationale || undefined, revision: reply.revision || undefined, kind },
+    ]);
+    if (reply.newFacts.length > 0) setFacts((prev) => mergeFacts(prev, reply.newFacts));
     setSaved(false);
+  }
+
+  async function handleAskReaction(reaction: string) {
+    const reply = await requestCallFollowUp(buildSession(), reaction);
+    recordReply(reaction, reply, "reaction");
   }
 
   async function handleAddExtraCard(cardId: string, label: string) {
     const extraCard: CallExtraCard = { id: newId("extra"), cardId, label };
-    const note = await requestExtraCardLink(buildSession(), extraCard);
-    setExtraCards((prev) => [...prev, { ...extraCard, note }]);
+    const reply = await requestExtraCardLink(buildSession(), extraCard);
+    setExtraCards((prev) => [...prev, { ...extraCard, note: reply.answer }]);
     const cardName = CARDS_BY_ID[cardId]?.nameKo ?? cardId;
-    setReactions((prev) => [...(prev ?? []), { question: `[카드 추가] ${label} → ${cardName}`, answer: note ?? "" }]);
+    recordReply(`[카드 추가] ${label} → ${cardName}`, reply, "extra-card");
+  }
+
+  function handleRemoveFact(index: number) {
+    setFacts((prev) => prev.filter((_, i) => i !== index));
     setSaved(false);
   }
 
@@ -344,38 +392,94 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
         </div>
       </header>
 
-      {disclaimer}
+      <details className="call-disclaimer call-disclaimer--compact">
+        <summary>⚠️ 보조 도구 안내</summary>
+        의료·법률·재정적 결정을 대신하지 않고, 제3자의 마음이나 미래를 단정하지 않아요. 참고용으로만
+        활용하세요.
+      </details>
 
-      <div className="reading-summary no-print">
-        <p>
-          <strong>{session.querentName || "(이름 없음)"}</strong> · {session.date} · {spread?.name}
-        </p>
-        <p className="reading-summary__question">Q. {session.question}</p>
-      </div>
+      <p className="call-summary">
+        <strong>{session.querentName || "(이름 없음)"}</strong> · Q. {session.question}
+      </p>
 
-      {spread && <SpreadBoard spread={spread} placements={placements} onSlotClick={handleSlotClick} />}
-
-      <CallScriptPanel
-        script={script}
-        loading={loading}
-        error={error}
-        onGenerate={handleGenerateScript}
-        canGenerate={canGenerate}
-        hint={generateHint}
-      />
-
-      {script && (
+      {!script ? (
         <>
-          <CallReactionThread reactions={reactions ?? []} onAsk={handleAskReaction} />
-          <CallExtraCardPicker usedCardIds={usedCardIds} onAdd={handleAddExtraCard} />
+          {spread && <SpreadBoard spread={spread} placements={placements} onSlotClick={handleSlotClick} />}
+          <CallScriptPanel
+            loading={loading}
+            error={error}
+            onGenerate={handleGenerateScript}
+            canGenerate={canGenerate}
+            hint={generateHint}
+          />
+          <div className="call-actions no-print">
+            <button type="button" className="btn" onClick={handleSave}>
+              {saved ? "저장됨 ✓" : "저장"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {spread && (
+            <CallCardStrip
+              spread={spread}
+              placements={placements}
+              extraCards={extraCards}
+              onSlotClick={handleSlotClick}
+            />
+          )}
+
+          <section className="call-core">
+            <div className="call-core__head">
+              <h3>📣 15초 핵심 결론</h3>
+              {script.coreConclusion && (
+                <span
+                  className={`call-core__badge${
+                    estimateSpeechSeconds(script.coreConclusion) > 18 ? " call-core__badge--long" : ""
+                  }`}
+                >
+                  약 {estimateSpeechSeconds(script.coreConclusion)}초
+                </span>
+              )}
+            </div>
+            <p>{script.coreConclusion || "핵심 결론이 비어 있어요. 아래 '상담 대본' 탭을 확인하거나 대본을 다시 생성해주세요."}</p>
+          </section>
+
+          <CallReactionThread reactions={reactions} onAsk={handleAskReaction} />
+
+          <CallScriptTabs script={script} reactions={reactions} facts={facts} onRemoveFact={handleRemoveFact} />
+
+          {loading && (
+            <div className="call-loading" role="status">
+              <span className="call-spinner" aria-hidden="true" />
+              <span>대본을 다시 만드는 중이에요… 보통 10~30초 걸려요.</span>
+            </div>
+          )}
+          {!loading && error && (
+            <div className="call-error" role="alert">
+              <p>{error}</p>
+              <button type="button" className="btn" onClick={handleGenerateScript} disabled={!canGenerate}>
+                다시 시도
+              </button>
+            </div>
+          )}
+
+          <div className="call-actions no-print">
+            <CallExtraCardPicker usedCardIds={usedCardIds} onAdd={handleAddExtraCard} />
+            <button
+              type="button"
+              className={`btn${confirmRegen ? " call-actions__confirm" : ""}`}
+              onClick={handleRegenerateClick}
+              disabled={loading || !canGenerate}
+            >
+              {loading ? "생성 중…" : confirmRegen ? "한 번 더 누르면 대화가 초기화돼요" : "대본 다시 생성"}
+            </button>
+            <button type="button" className="btn" onClick={handleSave}>
+              {saved ? "저장됨 ✓" : "저장"}
+            </button>
+          </div>
         </>
       )}
-
-      <div className="call-save-row no-print">
-        <button type="button" className="btn" onClick={handleSave}>
-          {saved ? "저장됨 ✓" : "저장"}
-        </button>
-      </div>
 
       {showSettings && <SettingsPanel onClose={handleCloseSettings} />}
 

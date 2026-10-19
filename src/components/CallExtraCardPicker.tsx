@@ -71,9 +71,15 @@ export function CallExtraCardPicker({ usedCardIds, onAdd }: CallExtraCardPickerP
                 onClick={handleConfirm}
                 disabled={loading || !label.trim()}
               >
-                {loading ? "연결 중…" : "해석에 연결"}
+                {loading ? "연결 중…" : error ? "다시 시도" : "해석에 연결"}
               </button>
             </div>
+            {loading && (
+              <div className="call-loading" role="status">
+                <span className="call-spinner" aria-hidden="true" />
+                <span>기존 해석과 연결하는 중이에요…</span>
+              </div>
+            )}
             {error && <p className="interpretation-panel__error">{error}</p>}
           </div>
         </div>

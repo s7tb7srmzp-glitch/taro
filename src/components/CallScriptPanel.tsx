@@ -1,7 +1,4 @@
-import type { CallScript } from "../lib/types";
-
 interface CallScriptPanelProps {
-  script: CallScript | null;
   loading: boolean;
   error: string | null;
   onGenerate: () => void;
@@ -9,62 +6,34 @@ interface CallScriptPanelProps {
   hint?: string;
 }
 
-export function CallScriptPanel({
-  script,
-  loading,
-  error,
-  onGenerate,
-  canGenerate,
-  hint,
-}: CallScriptPanelProps) {
+/** Shown before a script exists: the generate button, a loading state, and retry on failure. */
+export function CallScriptPanel({ loading, error, onGenerate, canGenerate, hint }: CallScriptPanelProps) {
   return (
     <div className="call-script-panel">
-      <div className="call-script-panel__actions no-print">
+      {loading ? (
+        <div className="call-loading" role="status">
+          <span className="call-spinner" aria-hidden="true" />
+          <span>상담 대본을 만드는 중이에요… 보통 10~30초 걸려요.</span>
+        </div>
+      ) : (
         <button
           type="button"
-          className="btn btn--primary btn--large"
+          className="btn btn--primary btn--large no-print"
           onClick={onGenerate}
-          disabled={loading || !canGenerate}
+          disabled={!canGenerate}
         >
-          {loading ? "스크립트 생성 중…" : script ? "스크립트 다시 생성" : "상담 스크립트 생성"}
+          상담 대본 생성
         </button>
-      </div>
+      )}
 
-      {hint && <p className="interpretation-panel__hint">{hint}</p>}
-      {error && <p className="interpretation-panel__error">{error}</p>}
+      {!loading && hint && <p className="interpretation-panel__hint">{hint}</p>}
 
-      {script && (
-        <div className="call-script-panel__body">
-          {script.coreConclusion && (
-            <section className="call-script-panel__section call-script-panel__section--core">
-              <h3>📣 15초 핵심 결론</h3>
-              <p>{script.coreConclusion}</p>
-            </section>
-          )}
-          {script.detail && (
-            <section className="call-script-panel__section">
-              <h3>🗣 1분 상세 설명</h3>
-              <p>{script.detail}</p>
-            </section>
-          )}
-          {script.questionToAsk && (
-            <section className="call-script-panel__section">
-              <h3>❓ 내담자에게 물어볼 질문</h3>
-              <p>{script.questionToAsk}</p>
-            </section>
-          )}
-          {script.closing && (
-            <section className="call-script-panel__section">
-              <h3>👋 마무리</h3>
-              <p>{script.closing}</p>
-            </section>
-          )}
-          {script.rationale && (
-            <details className="call-script-panel__rationale" open>
-              <summary>📚 해석 근거 (학습용 — 상담사가 읽는 대본 아님)</summary>
-              <p>{script.rationale}</p>
-            </details>
-          )}
+      {!loading && error && (
+        <div className="call-error" role="alert">
+          <p>{error}</p>
+          <button type="button" className="btn" onClick={onGenerate} disabled={!canGenerate}>
+            다시 시도
+          </button>
         </div>
       )}
     </div>
