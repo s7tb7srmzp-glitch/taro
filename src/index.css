@@ -592,6 +592,194 @@ h2 {
   margin: 0;
 }
 
+/* ---------- call mode ---------- */
+.call-mode .app-header h1 {
+  color: #ffb648;
+}
+
+.call-disclaimer {
+  background: rgba(255, 154, 154, 0.12);
+  border: 1px solid rgba(255, 154, 154, 0.35);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.call-script-panel {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.call-script-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.call-script-panel__section h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
+.call-script-panel__section p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.call-script-panel__section--core {
+  background: rgba(255, 182, 72, 0.12);
+  border: 1px solid rgba(255, 182, 72, 0.35);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.call-script-panel__section--core h3 {
+  font-size: 1.05rem;
+}
+
+.call-script-panel__section--core p {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.call-script-panel__rationale {
+  border: 1px dashed rgba(244, 233, 216, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  opacity: 0.8;
+}
+
+.call-script-panel__rationale summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.call-script-panel__rationale p {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 0.88rem;
+}
+
+.call-reaction-thread {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.call-reaction-thread h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.call-reaction-thread__history {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.call-reaction-thread__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.call-reaction-thread__question {
+  margin: 0;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.call-reaction-thread__answer {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+  opacity: 0.92;
+}
+
+.call-reaction-thread__composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.call-reaction-thread__composer textarea {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f4e9d8;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.call-reaction-thread__composer .btn {
+  align-self: flex-end;
+}
+
+.call-extra-card__label-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 16px;
+}
+
+.call-extra-card__label-panel {
+  width: 100%;
+  max-width: 420px;
+  background: #241a2c;
+  border: 1px solid rgba(244, 233, 216, 0.2);
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.call-extra-card__label-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.call-extra-card__label-panel textarea {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f4e9d8;
+  font-family: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.call-extra-card__label-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.call-save-row {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* ---------- mobile ---------- */
 @media (max-width: 640px) {
   .app-shell {
@@ -632,6 +820,18 @@ h2 {
 
   .card-picker {
     max-height: 85vh;
+  }
+
+  .call-script-panel__section--core p {
+    font-size: 1rem;
+  }
+
+  .call-save-row {
+    justify-content: stretch;
+  }
+
+  .call-save-row .btn {
+    width: 100%;
   }
 }
 
@@ -688,6 +888,26 @@ h2 {
   .card-face {
     box-shadow: none;
     border-color: #999;
+  }
+
+  .call-disclaimer,
+  .call-script-panel,
+  .call-reaction-thread {
+    background: none;
+    border: none;
+    padding: 0;
+  }
+
+  .call-script-panel__section--core,
+  .call-script-panel__rationale {
+    background: none;
+    border: 1px solid #999;
+  }
+
+  .call-script-panel__section p,
+  .call-reaction-thread__question,
+  .call-reaction-thread__answer {
+    color: #111;
   }
 }
 

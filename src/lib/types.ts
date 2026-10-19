@@ -23,3 +23,40 @@ export interface Reading {
   userComment?: string;
   createdAt: string;
 }
+
+/** The structured phone-consultation script generated for a counselor mid-call. */
+export interface CallScript {
+  /** ~15 seconds: the one or two sentences the counselor leads with. */
+  coreConclusion: string;
+  /** ~1 minute: fuller explanation weaving position weight and card relationships. */
+  detail: string;
+  /** Question(s) to ask the client back. */
+  questionToAsk: string;
+  /** Closing remarks. */
+  closing: string;
+  /** Why it was interpreted this way — study notes, not meant to be read aloud. */
+  rationale: string;
+}
+
+/** A card drawn mid-call outside the original spread, linked back to the existing reading. */
+export interface CallExtraCard {
+  id: string;
+  cardId: string;
+  /** Why the counselor drew it (e.g. "다음 달은 어떨까요?"). */
+  label: string;
+  /** AI's short note connecting this card to the existing script. */
+  note?: string;
+}
+
+export interface CallSession {
+  id: string;
+  session: SessionInfo;
+  spreadId: string;
+  /** positionId -> cardId */
+  placements: Record<string, string>;
+  script?: CallScript;
+  /** Client reactions/questions asked live and the short replies given, in order. */
+  reactions?: FollowUp[];
+  extraCards?: CallExtraCard[];
+  createdAt: string;
+}

@@ -9,6 +9,7 @@ import { CommentBox } from "./components/CommentBox";
 import { ReadingList } from "./components/ReadingList";
 import { BackupPanel } from "./components/BackupPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { CallConsultant } from "./components/CallConsultant";
 import { SPREADS_BY_ID } from "./data/spreads";
 import type { FollowUp, Reading, SessionInfo } from "./lib/types";
 import { listReadings, saveReading, deleteReading } from "./lib/storage";
@@ -28,6 +29,7 @@ function newReadingId(): string {
 type Step = "setup" | "board";
 
 export default function App() {
+  const [appMode, setAppMode] = useState<"study" | "call">("study");
   const [step, setStep] = useState<Step>("setup");
   const [readings, setReadings] = useState<Reading[]>(() => listReadings());
 
@@ -187,6 +189,10 @@ export default function App() {
 
   const activePosition = spread?.positions.find((p) => p.id === activeSlotId);
 
+  if (appMode === "call") {
+    return <CallConsultant onExit={() => setAppMode("study")} />;
+  }
+
   if (step === "setup") {
     return (
       <div className="app-shell">
@@ -194,6 +200,9 @@ export default function App() {
           <h1>타로 리딩</h1>
           <p>스프레드를 선택하고, 카드를 직접 골라 배치해보세요.</p>
           <div className="app-header__actions">
+            <button type="button" className="btn btn--ghost" onClick={() => setAppMode("call")}>
+              📞 전화상담 모드
+            </button>
             <button type="button" className="btn btn--ghost" onClick={() => setShowSettings(true)}>
               {apiKeyPresent ? "설정" : "AI 설정 필요"}
             </button>
