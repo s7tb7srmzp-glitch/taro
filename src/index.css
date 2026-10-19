@@ -282,10 +282,20 @@ h2 {
 .spread-board {
   position: relative;
   width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
   border-radius: 16px;
   overflow: hidden;
   border: 6px solid #3a2418;
   box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.6), 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* Card sizes, positions and fonts inside the stage are all in cqw, so the whole layout scales
+   with the board width; see src/lib/spreadLayout.ts. */
+.spread-board__stage {
+  position: relative;
+  width: 100%;
+  container-type: inline-size;
 }
 
 .spread-board__cloth {
@@ -305,53 +315,58 @@ h2 {
 
 .spread-slot {
   position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
+  transform: translate(-50%, -50%);
+  display: block;
   background: none;
   border: none;
   cursor: pointer;
   padding: 0;
+  color: inherit;
+  font: inherit;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.spread-slot__card {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.spread-slot__card .card-face {
+  width: 100%;
 }
 
 .spread-slot__empty {
-  aspect-ratio: 5 / 8.75;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
   border: 2px dashed rgba(244, 233, 216, 0.4);
   border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.6rem;
+  font-size: clamp(1rem, 6cqw, 1.8rem);
   color: rgba(244, 233, 216, 0.45);
   background: rgba(0, 0, 0, 0.15);
 }
 
-.spread-slot__empty--sm {
-  width: clamp(40px, 11vw, 64px);
-  font-size: 1.1rem;
-}
-
-.spread-slot__empty--md {
-  width: clamp(58px, 17vw, 108px);
-}
-
-.spread-slot__empty--lg {
-  width: clamp(84px, 26vw, 160px);
-}
-
-.spread-slot:hover .spread-slot__empty {
+.spread-slot:hover .spread-slot__empty,
+.spread-slot:focus-visible .spread-slot__empty {
   border-color: rgba(244, 233, 216, 0.75);
   color: rgba(244, 233, 216, 0.8);
 }
 
 .spread-slot__label {
-  font-size: 0.64rem;
+  position: absolute;
+  display: block;
   text-align: center;
-  max-width: 96px;
-  opacity: 0.85;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
-  line-height: 1.2;
+  font-size: clamp(10px, calc(var(--label-font) * 1cqw), 13.5px);
+  line-height: 1.25;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  opacity: 0.92;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   pointer-events: none;
 }
 
@@ -364,30 +379,50 @@ h2 {
   align-items: flex-end;
   justify-content: center;
   z-index: 50;
+  overscroll-behavior: contain;
 }
 
 .card-picker {
   width: 100%;
-  max-width: 980px;
-  max-height: 80vh;
+  max-width: 760px;
+  max-height: 88vh;
+  max-height: 88dvh;
   background: #241a2c;
   border: 1px solid rgba(244, 233, 216, 0.2);
   border-radius: 16px 16px 0 0;
-  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  padding: 14px 14px calc(12px + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   overflow: hidden;
+}
+
+@media (min-width: 800px) {
+  .card-picker-overlay {
+    align-items: center;
+  }
+
+  .card-picker {
+    border-radius: 16px;
+    max-height: 90vh;
+  }
 }
 
 .card-picker__header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.card-picker__title {
+  min-width: 0;
 }
 
 .card-picker__slot {
   font-weight: 600;
+  line-height: 1.35;
 }
 
 .card-picker__hint {
@@ -398,46 +433,128 @@ h2 {
 .card-picker__header-actions {
   display: flex;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+.card-picker__header-actions .btn {
+  min-height: 40px;
 }
 
 .card-picker__tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+  flex-shrink: 0;
 }
 
-.card-picker__tab {
+.card-picker__tab,
+.card-picker__suit {
   border: 1px solid rgba(244, 233, 216, 0.25);
   background: transparent;
   color: #f4e9d8;
-  padding: 6px 14px;
+  min-height: 42px;
+  padding: 6px 8px;
   border-radius: 999px;
   cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card-picker__tab--active,
+.card-picker__suit--active {
+  background: #7a4fb0;
+  border-color: #9a6fd0;
+  font-weight: 600;
+}
+
+.card-picker__suits {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.card-picker__suit {
+  border-radius: 10px;
   font-size: 0.85rem;
 }
 
-.card-picker__tab--active {
-  background: #7a4fb0;
-  border-color: #9a6fd0;
+.card-picker__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+  gap: 8px;
+  align-content: start;
+  padding-bottom: 6px;
 }
 
-.card-picker__grid {
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
-  gap: 10px;
-  padding-bottom: 8px;
+/* Pip cards: 10 per suit, shown as 5 x 2 (fewer columns only on very narrow screens). */
+.card-picker__grid--pip {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* Court cards: 4 per suit, one suit per row. */
+.card-picker__grid--court {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.card-picker__grid--major {
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+}
+
+@media (max-width: 340px) {
+  .card-picker__grid--pip {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .card-picker__grid--court {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 800px) {
+  .card-picker__grid--major {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 12px;
+  }
+
+  .card-picker__grid {
+    gap: 12px;
+  }
 }
 
 .card-picker__cell {
   background: none;
   border: none;
-  padding: 4px;
+  padding: 4px 2px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   cursor: pointer;
   border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card-picker__cell .card-face {
+  width: 100%;
 }
 
 .card-picker__cell:hover:not(:disabled) {
@@ -454,10 +571,11 @@ h2 {
 }
 
 .card-picker__cell-name {
-  font-size: 0.62rem;
+  font-size: 0.7rem;
   text-align: center;
-  line-height: 1.2;
-  opacity: 0.85;
+  line-height: 1.25;
+  opacity: 0.9;
+  word-break: keep-all;
 }
 
 /* ---------- interpretation panel ---------- */
@@ -1104,18 +1222,9 @@ h2 {
     grid-template-columns: 1fr 1fr;
   }
 
-  .spread-slot__label {
-    font-size: 0.56rem;
-    max-width: 70px;
-  }
-
   .interpretation-panel__actions {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .card-picker {
-    max-height: 85vh;
   }
 
   .call-core p {

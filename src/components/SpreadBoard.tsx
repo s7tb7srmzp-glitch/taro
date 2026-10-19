@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react";
 import type { SpreadTemplate } from "../data/spreads";
 import { CARDS_BY_ID } from "../data/cards";
+import { getSpreadLayout } from "../lib/spreadLayout";
 import { CardFace } from "./CardFace";
 
 interface SpreadBoardProps {
@@ -8,48 +10,62 @@ interface SpreadBoardProps {
   onSlotClick: (positionId: string) => void;
 }
 
-/** Denser spreads use smaller cards so positions don't overlap. */
-function cardSizeFor(positionCount: number): "sm" | "md" | "lg" {
-  if (positionCount <= 3) return "lg";
-  if (positionCount <= 4) return "md";
-  return "sm";
-}
+const cq = (n: number) => `${n.toFixed(3)}cqw`;
 
 export function SpreadBoard({ spread, placements, onSlotClick }: SpreadBoardProps) {
-  const size = cardSizeFor(spread.positions.length);
+  const layout = getSpreadLayout(spread);
 
   return (
-    <div className="spread-board" style={{ aspectRatio: spread.boardAspect }}>
-      <div className="spread-board__cloth" />
-      {spread.positions.map((pos) => {
-        const cardId = placements[pos.id];
-        const card = cardId ? CARDS_BY_ID[cardId] : undefined;
-        return (
-          <button
-            key={pos.id}
-            type="button"
-            className="spread-slot"
-            style={{
-              left: `${pos.x}%`,
-              top: `${pos.y}%`,
-              transform: `translate(-50%, -50%) rotate(${pos.rotation ?? 0}deg)`,
-            }}
-            onClick={() => onSlotClick(pos.id)}
-          >
-            {card ? (
-              <CardFace card={card} size={size} />
-            ) : (
-              <div className={`spread-slot__empty spread-slot__empty--${size}`}>
-                <span>+</span>
-              </div>
-            )}
-            <span className="spread-slot__label" style={{ transform: `rotate(${-(pos.rotation ?? 0)}deg)` }}>
-              {pos.label}
-              {pos.optional ? " (선택)" : ""}
-            </span>
-          </button>
-        );
-      })}
+    <div className="spread-board">
+      <div
+        className="spread-board__stage"
+        style={{ aspectRatio: `100 / ${layout.boardH.toFixed(3)}`, "--label-font": layout.labelFont } as CSSProperties}
+      >
+        <div className="spread-board__cloth" />
+        {layout.slots.map((slot) => {
+          const cardId = placements[slot.id];
+          const card = cardId ? CARDS_BY_ID[cardId] : undefined;
+          const boxLeft = slot.cx - layout.cardW / 2;
+          const boxTop = slot.cy - layout.cardH / 2;
+          return (
+            <button
+              key={slot.id}
+              type="button"
+              className="spread-slot"
+              aria-label={`${slot.label}${card ? `: ${card.nameKo}` : " (비어 있음)"}`}
+              style={{
+                left: `${((slot.cx / 100) * 100).toFixed(3)}%`,
+                top: `${((slot.cy / layout.boardH) * 100).toFixed(3)}%`,
+                width: cq(layout.cardW),
+                height: cq(layout.cardH),
+              }}
+              onClick={() => onSlotClick(slot.id)}
+            >
+              <span className="spread-slot__card" style={{ transform: `rotate(${slot.rotation}deg)` }}>
+                {card ? (
+                  <CardFace card={card} size="lg" />
+                ) : (
+                  <span className="spread-slot__empty">
+                    <span>+</span>
+                  </span>
+                )}
+              </span>
+              <span
+                className="spread-slot__label"
+                style={{
+                  left: cq(slot.labelX - boxLeft),
+                  ...(slot.labelBottom === null
+                    ? { top: cq(slot.labelY - boxTop) }
+                    : { bottom: cq(slot.labelBottom) }),
+                  width: cq(slot.labelW),
+                }}
+              >
+                {slot.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

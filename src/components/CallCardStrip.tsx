@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { SpreadTemplate } from "../data/spreads";
 import { CARDS_BY_ID } from "../data/cards";
+import { shortLabel } from "../data/spreadLabels";
 import type { CallExtraCard } from "../lib/types";
 import { CardFace } from "./CardFace";
 import { SpreadBoard } from "./SpreadBoard";
@@ -51,7 +52,7 @@ export function CallCardStrip({ spread, placements, extraCards, onSlotClick }: C
                 {card && <CardFace card={card} size="sm" />}
                 <span className="call-card-strip__pos">
                   {p.weight === 3 ? "★ " : ""}
-                  {p.label}
+                  {shortLabel(spread.id, p.id, p.label)}
                 </span>
                 <span className="call-card-strip__name">{card?.nameKo}</span>
               </li>
