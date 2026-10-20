@@ -1212,39 +1212,175 @@ h2 {
   opacity: 0.55;
 }
 
-.call-suggest {
-  border: 1px solid rgba(154, 111, 208, 0.45);
+.call-followup > .btn {
+  align-self: flex-start;
+}
+
+.call-followup__suppressed {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.6;
+  line-height: 1.45;
+}
+
+/* extra-card proposal → selection → reading */
+.call-extra-flow {
+  border: 1px solid rgba(154, 111, 208, 0.55);
+  background: rgba(122, 79, 176, 0.14);
   border-radius: 12px;
-  padding: 10px 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.call-extra-flow__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.call-extra-flow__head h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.call-extra-flow__badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(122, 79, 176, 0.5);
+}
+
+.call-extra-flow__status,
+.call-extra-flow__purpose,
+.call-extra-flow__hint {
+  margin: 0;
+  font-size: 0.82rem;
+  opacity: 0.75;
+  line-height: 1.45;
+}
+
+.call-extra-flow__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.call-extra-flow__field > span {
+  opacity: 0.65;
+}
+
+.call-extra-flow__question {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #f4e9d8;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.call-extra-flow__question-text {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.call-extra-flow__count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.call-extra-flow__spread {
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+.call-extra-flow__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.call-extra-flow__cards li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: rgba(244, 233, 216, 0.1);
+  font-size: 0.88rem;
+}
+
+.call-extra-flow__cards button {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+  min-width: 28px;
+  min-height: 28px;
+}
+
+.call-extra-flow__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.call-extra-flow__actions > .btn {
+  flex: 1 1 auto;
+}
+
+.call-extra-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 3px solid rgba(154, 111, 208, 0.7);
+  padding-left: 10px;
+}
+
+.call-extra-reading h3 {
+  margin: 0;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.call-extra-reading__answer {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.call-composer__confirm {
+  border: 1px solid rgba(154, 111, 208, 0.55);
+  border-radius: 10px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.call-suggest h4 {
+.call-composer__confirm p {
   margin: 0;
   font-size: 0.9rem;
 }
 
-.call-suggest dl {
-  margin: 0;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 10px;
-  font-size: 0.88rem;
-}
-
-.call-suggest dt {
-  opacity: 0.65;
-}
-
-.call-suggest dd {
-  margin: 0;
-}
-
-.call-suggest .btn,
-.call-followup > .btn {
-  align-self: flex-start;
+.call-composer__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .call-followup__older-toggle {
@@ -1367,58 +1503,9 @@ h2 {
   flex: 1 1 auto;
 }
 
-.call-actions .call-extra-card .btn {
-  width: 100%;
-}
-
 .call-actions__confirm {
   border-color: #ff9a9a;
   color: #ff9a9a;
-}
-
-.call-extra-card__label-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 60;
-  padding: 16px;
-}
-
-.call-extra-card__label-panel {
-  width: 100%;
-  max-width: 420px;
-  background: #241a2c;
-  border: 1px solid rgba(244, 233, 216, 0.2);
-  border-radius: 14px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.call-extra-card__label-title {
-  margin: 0;
-  font-weight: 600;
-}
-
-.call-extra-card__label-panel textarea {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(244, 233, 216, 0.25);
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: #f4e9d8;
-  font-family: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
-}
-
-.call-extra-card__label-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
 }
 
 /* ---------- mobile ---------- */

@@ -87,3 +87,41 @@ export function importCallSessionsJson(json: string): number {
   writeAll(all);
   return parsed.length;
 }
+
+/*
+ * The call in progress, kept in sessionStorage so a page refresh mid-call doesn't lose picked
+ * extra cards or the conversation. It disappears when the tab is closed or a new call starts.
+ */
+const DRAFT_KEY = "taro-call-draft";
+
+export interface CallDraft {
+  call: CallSession;
+  saved: boolean;
+}
+
+export function saveCallDraft(draft: CallDraft): void {
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // Storage full or unavailable: the draft is a convenience only.
+  }
+}
+
+export function loadCallDraft(): CallDraft | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && isCallSession(parsed.call) ? { call: parsed.call, saved: !!parsed.saved } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCallDraft(): void {
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // ignore
+  }
+}

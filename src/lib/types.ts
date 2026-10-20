@@ -66,6 +66,51 @@ export interface ExtraCardSuggestion {
   question: string;
   count: string;
   spread: string;
+  /** Parsed card count (1~3); absent on suggestions saved before this existed. */
+  countNum?: number;
+}
+
+/**
+ * Where an extra-card draw currently stands. No flow (undefined) means normal consultation.
+ * proposed → accepted → selecting → selected → interpreting → (back to normal)
+ */
+export type ExtraFlowStatus = "proposed" | "accepted" | "selecting" | "selected" | "interpreting";
+
+export interface ExtraCardFlow {
+  id: string;
+  status: ExtraFlowStatus;
+  source: "ai" | "manual";
+  /** The question the extra cards answer. Fixed once accepted unless the counselor edits it. */
+  question: string;
+  purpose: string;
+  count: number;
+  spread: string;
+  /** Cards picked so far, in order. Kept across cancel, API errors and reloads. */
+  cardIds: string[];
+  /** How the client's acceptance was registered. */
+  acceptedBy?: "button" | "remark";
+  error?: string;
+}
+
+/** History of every extra-card proposal and what became of it. */
+export interface ExtraCardLogEntry {
+  id: string;
+  question: string;
+  purpose?: string;
+  source: "ai" | "manual";
+  outcome: "drawn" | "declined" | "dismissed";
+  acceptedBy?: "button" | "remark";
+  cardIds?: string[];
+  at: string;
+}
+
+/** The structured part of an extra-card reading. */
+export interface ExtraCardReading {
+  question: string;
+  cardIds: string[];
+  cards: string;
+  relation: string;
+  directAnswer: string;
 }
 
 /** The 20~30 second wrap-up generated when the counselor ends the call. */
@@ -104,6 +149,9 @@ export interface CallReaction extends FollowUp {
   nextQuestionKind?: CallGuideKind;
   next?: CallNext;
   extraCardSuggestion?: ExtraCardSuggestion;
+  /** Set when an AI card proposal was not shown because it repeated an earlier one. */
+  proposalSuppressed?: string;
+  extraReading?: ExtraCardReading;
 }
 
 export interface CallSession {
@@ -119,6 +167,8 @@ export interface CallSession {
   /** Facts the client confirmed during the call, carried into every later reply. */
   facts?: string[];
   closing?: CallClosing;
+  extraFlow?: ExtraCardFlow;
+  extraCardLog?: ExtraCardLogEntry[];
   createdAt: string;
 }
 
@@ -133,4 +183,7 @@ export interface CallReply {
   nextQuestionKind?: CallGuideKind;
   next: CallNext;
   extraCardSuggestion?: ExtraCardSuggestion;
+  /** True when the AI proposed drawing more cards (structured field, with a text fallback). */
+  cardProposed: boolean;
+  extraReading?: Omit<ExtraCardReading, "question" | "cardIds">;
 }

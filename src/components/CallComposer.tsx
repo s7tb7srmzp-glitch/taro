@@ -1,18 +1,24 @@
 import { useState } from "react";
-import { REACTION_TAGS } from "../lib/callText";
+import { REACTION_TAGS, classifyProposalAnswer } from "../lib/callText";
 import type { CallTurnInput } from "../lib/ai";
 
 interface CallComposerProps {
   onGenerate: (input: CallTurnInput) => Promise<void>;
   disabled?: boolean;
+  /** An extra-card proposal is waiting for the client's answer. */
+  proposalPending?: boolean;
+  /** The remark clearly accepts the pending proposal: go to card selection instead of a new script. */
+  onAcceptProposal?: () => void;
 }
 
 /** Middle of the call screen: optional quick-reaction buttons + a short note, sent only on demand. */
-export function CallComposer({ onGenerate, disabled }: CallComposerProps) {
+export function CallComposer({ onGenerate, disabled, proposalPending, onAcceptProposal }: CallComposerProps) {
   const [tags, setTags] = useState<string[]>([]);
   const [remark, setRemark] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Shown when a bare "네" might or might not answer the card proposal. */
+  const [askIfAnswer, setAskIfAnswer] = useState(false);
 
   const canSend = (tags.length > 0 || remark.trim().length > 0) && !pending && !disabled;
 
@@ -20,14 +26,35 @@ export function CallComposer({ onGenerate, disabled }: CallComposerProps) {
     setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
   }
 
-  async function send() {
+  function clearInput() {
+    setTags([]);
+    setRemark("");
+    setAskIfAnswer(false);
+  }
+
+  function acceptProposal() {
+    onAcceptProposal?.();
+    clearInput();
+  }
+
+  function send() {
     if (!canSend) return;
+    if (proposalPending && onAcceptProposal) {
+      const answer = classifyProposalAnswer(remark);
+      if (answer === "accept") return acceptProposal();
+      if (answer === "unclear") return setAskIfAnswer(true);
+    }
+    return generate();
+  }
+
+  async function generate() {
+    if (!canSend) return;
+    setAskIfAnswer(false);
     setPending(true);
     setError(null);
     try {
       await onGenerate({ tags, remark: remark.trim() });
-      setTags([]);
-      setRemark("");
+      clearInput();
     } catch (e) {
       setError(e instanceof Error ? e.message : "대본 생성 중 오류가 발생했어요.");
     } finally {
@@ -59,7 +86,10 @@ export function CallComposer({ onGenerate, disabled }: CallComposerProps) {
         rows={2}
         value={remark}
         disabled={pending}
-        onChange={(e) => setRemark(e.target.value)}
+        onChange={(e) => {
+          setRemark(e.target.value);
+          setAskIfAnswer(false);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
@@ -75,6 +105,20 @@ export function CallComposer({ onGenerate, disabled }: CallComposerProps) {
         {pending ? "다음 상담 대본 만드는 중…" : "다음 상담 대본 생성"}
       </button>
 
+      {askIfAnswer && proposalPending && (
+        <div className="call-composer__confirm" role="alert">
+          <p>“{remark.trim()}”가 추가 카드 제안에 대한 대답인가요?</p>
+          <div className="call-composer__confirm-actions">
+            <button type="button" className="btn btn--primary" onClick={acceptProposal}>
+              네, 카드 뽑기
+            </button>
+            <button type="button" className="btn" onClick={generate}>
+              아니요, 일반 대본으로
+            </button>
+          </div>
+        </div>
+      )}
+
       {pending && (
         <div className="call-loading" role="status">
           <span className="call-spinner" aria-hidden="true" />
@@ -84,7 +128,7 @@ export function CallComposer({ onGenerate, disabled }: CallComposerProps) {
       {error && (
         <div className="call-error" role="alert">
           <p>{error}</p>
-          <button type="button" className="btn" onClick={send} disabled={!canSend}>
+          <button type="button" className="btn" onClick={generate} disabled={!canSend}>
             다시 시도
           </button>
         </div>

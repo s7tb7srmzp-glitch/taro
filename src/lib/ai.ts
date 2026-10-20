@@ -1,12 +1,12 @@
 import type {
   CallClosing,
-  CallExtraCard,
   CallGuideKind,
   CallNext,
   CallReaction,
   CallReply,
   CallScript,
   CallSession,
+  ExtraCardFlow,
   ExtraCardSuggestion,
   Reading,
 } from "./types";
@@ -180,7 +180,11 @@ const REPLY_LABELS = [
   "해석수정",
   "새사실",
   "다음진행",
+  "카드제안",
   "추가카드",
+  "카드해석",
+  "기존카드관계",
+  "질문답변",
   "답변",
   "근거",
 ] as const;
@@ -432,30 +436,57 @@ function parseExtraCardSuggestion(text: string | undefined): ExtraCardSuggestion
     const line = text!.split("\n").find((l) => label.test(l));
     return line ? line.replace(/^\s*(?:[-·•*]\s*)?[^:：]*[:：]\s*/, "").trim() : "";
   };
+  const count = pick(/카드\s*수|장\s*수/);
+  const n = parseInt(count.replace(/[^0-9]/g, ""), 10);
   const suggestion = {
     purpose: pick(/목적/),
     question: pick(/추천\s*질문|질문/),
-    count: pick(/카드\s*수|장\s*수/),
+    count,
     spread: pick(/스프레드|배열/),
+    countNum: Number.isFinite(n) ? Math.min(3, Math.max(1, n)) : 1,
   };
-  return Object.values(suggestion).some(Boolean) ? suggestion : undefined;
+  return [suggestion.purpose, suggestion.question, suggestion.count, suggestion.spread].some(Boolean)
+    ? suggestion
+    : undefined;
 }
+
+/** Fallback only: the reply text itself offers to draw another card. */
+const CARD_OFFER_RE = /(카드|한\s*장).{0,12}(더\s*)?뽑아\s*(볼까요|드릴까요|봐요|보면|볼게요|보시겠어요)|추가\s*카드.{0,8}(뽑|보)/;
 
 export function parseCallReply(raw: string): CallReply {
   const s = parseSections(raw, REPLY_LABELS);
   if (!s) {
-    return { answer: raw.trim(), rationale: "", revision: "", newFacts: [], nextQuestion: "", next: "continue" };
+    return {
+      answer: raw.trim(),
+      rationale: "",
+      revision: "",
+      newFacts: [],
+      nextQuestion: "",
+      next: "continue",
+      cardProposed: false,
+    };
   }
 
   const revision = s["해석수정"] ?? "";
   const facts = s["새사실"] ?? "";
   const rawQuestion = s["다음질문"] ?? "";
   const nextQuestion = isNone(rawQuestion) ? "" : singleQuestion(rawQuestion);
-  const next = parseNext(s["다음진행"]);
+  const answer = s["할말"] ?? s["답변"] ?? "";
+  const proposalField = s["카드제안"];
+  const explicitYes = !!proposalField && /^(예|네|yes)/i.test(proposalField.trim());
+  const explicitNo = !!proposalField && /^(아니|no)/i.test(proposalField.trim());
+  const suggestion = parseExtraCardSuggestion(s["추가카드"]);
+  const cardProposed =
+    explicitYes || (!explicitNo && (parseNext(s["다음진행"]) === "extra-card" || CARD_OFFER_RE.test(answer)));
+  const next = cardProposed ? "extra-card" : parseNext(s["다음진행"]) === "extra-card" ? "continue" : parseNext(s["다음진행"]);
   const qKind = parseGuideKind(s["질문유형"]);
+  const reading =
+    s["카드해석"] || s["기존카드관계"] || s["질문답변"]
+      ? { cards: s["카드해석"] ?? "", relation: s["기존카드관계"] ?? "", directAnswer: s["질문답변"] ?? "" }
+      : undefined;
 
   return {
-    answer: s["할말"] ?? s["답변"] ?? "",
+    answer,
     rationale: s["참고메모"] ?? s["근거"] ?? "",
     revision: isNone(revision) ? "" : revision,
     newFacts: isNone(facts)
@@ -467,7 +498,11 @@ export function parseCallReply(raw: string): CallReply {
     nextQuestion,
     nextQuestionKind: nextQuestion ? (qKind === "close" ? "confirm" : (qKind ?? "confirm")) : undefined,
     next,
-    extraCardSuggestion: next === "extra-card" ? parseExtraCardSuggestion(s["추가카드"]) : undefined,
+    cardProposed,
+    extraCardSuggestion: cardProposed
+      ? (suggestion ?? { purpose: "", question: "", count: "1장", spread: "원 카드", countNum: 1 })
+      : undefined,
+    extraReading: reading,
   };
 }
 
@@ -489,6 +524,10 @@ export function parseCallClosing(raw: string): CallClosing {
 
 /** How the counselor's input for one turn is shown back to the model. */
 function describeTurn(r: CallReaction): string {
+  if (r.kind === "extra-card" && r.extraReading) {
+    const names = r.extraReading.cardIds.map((id) => CARDS_BY_ID[id]?.nameKo ?? id).join(", ");
+    return `[추가 카드] 질문: ${r.extraReading.question} / 뽑은 카드: ${names}`;
+  }
   if (r.kind === "extra-card") return r.question;
   if (r.tags || r.remark !== undefined) {
     return [
@@ -500,10 +539,22 @@ function describeTurn(r: CallReaction): string {
 }
 
 function serializeCallReaction(r: CallReaction): string {
-  const parts = [`===할말===`, r.answer, `===다음질문===`, r.nextQuestion || "없음"];
+  const parts: string[] = [];
+  if (r.extraReading) {
+    parts.push(
+      `===카드해석===`,
+      r.extraReading.cards,
+      `===기존카드관계===`,
+      r.extraReading.relation,
+      `===질문답변===`,
+      r.extraReading.directAnswer,
+    );
+  }
+  parts.push(`===할말===`, r.answer, `===다음질문===`, r.nextQuestion || "없음");
   if (r.rationale) parts.push(`===참고메모===`, r.rationale);
   if (r.revision) parts.push(`===해석수정===`, r.revision);
   parts.push(`===다음진행===`, NEXT_LABEL[r.next ?? "continue"]);
+  parts.push(`===카드제안===`, r.next === "extra-card" ? "예" : "아니오");
   return parts.join("\n");
 }
 
@@ -540,7 +591,7 @@ function buildCallConversationSoFar(
       content: [
         `앞선 상담 내용 요약 (오래된 대화를 줄여서 정리한 것):`,
         ...older.map((r) => {
-          const said = r.kind === "extra-card" ? r.question : (r.remark || r.tags?.join(", ") || r.question);
+          const said = r.kind === "extra-card" ? describeTurn(r) : (r.remark || r.tags?.join(", ") || r.question);
           return `- ${r.kind === "extra-card" ? "추가 카드" : "내담자 측"}: ${clip(said, 60)} → 상담사가 한 말: ${clip(r.answer, 70)}${
             r.nextQuestion ? ` (물어본 질문: ${r.nextQuestion})` : ""
           }${r.revision ? ` [해석 수정: ${clip(r.revision, 50)}]` : ""}`;
@@ -567,6 +618,20 @@ function askedQuestions(session: CallSession): string[] {
   return asked;
 }
 
+function extraCardHistoryLines(session: CallSession): string[] {
+  const log = session.extraCardLog ?? [];
+  const drawn = log.filter((e) => e.outcome === "drawn").map((e) => e.question);
+  const refused = log.filter((e) => e.outcome !== "drawn").map((e) => e.question).filter(Boolean);
+  const lines: string[] = [];
+  if (drawn.length) lines.push([`이미 추가 카드를 뽑은 질문 (같은 질문으로 다시 제안하지 마세요):`, ...drawn.map((q) => `· ${q}`)].join("\n"));
+  if (refused.length) lines.push([`내담자가 거절했거나 넘어간 추가 카드 제안 (반복하지 마세요):`, ...refused.map((q) => `· ${q}`)].join("\n"));
+  const last = (session.reactions ?? []).at(-1);
+  if (last?.kind === "extra-card" && last.extraReading) {
+    lines.push(`직전에 추가 카드를 해석했어요. 완전히 새로운 주제가 아니면 이번에는 추가 카드를 제안하지 마세요.`);
+  }
+  return lines;
+}
+
 function buildContextBlock(session: CallSession): string {
   const facts = session.facts ?? [];
   const asked = askedQuestions(session);
@@ -583,6 +648,7 @@ function buildContextBlock(session: CallSession): string {
     extras.length
       ? [`추가로 뽑은 카드:`, ...extras.map((x) => `· ${CARDS_BY_ID[x.cardId]?.nameKo ?? x.cardId} — ${x.label}`)].join("\n")
       : `추가로 뽑은 카드: 없음`,
+    ...extraCardHistoryLines(session),
     `주의: 앞선 AI 해석은 카드가 보여주는 가능성일 뿐 확정된 사실이 아니에요. 내담자의 실제 발언과`,
     `맞지 않으면 해석을 조정하거나 불확실하다고 분명히 말하세요.`,
   ].join("\n");
@@ -610,11 +676,13 @@ const CALL_REPLY_FORMAT = [
   `카드 해석이나 추측은 적지 마세요. 이미 확인된 사실은 반복하지 마세요. 없으면 "없음")`,
   `===다음진행===`,
   `(상담 계속 / 추가 카드 검토 / 상담 마무리 가능 중 하나. 상담사에게 주는 권고일 뿐입니다.)`,
+  `===카드제안===`,
+  `(예 / 아니오. 할말에서 카드를 더 뽑아보자고 말했다면 반드시 "예", 그렇지 않으면 "아니오")`,
   `===추가카드===`,
-  `(다음진행이 "추가 카드 검토"일 때만 아래 네 줄, 아니면 "없음")`,
+  `(카드제안이 "예"일 때만 아래 네 줄, 아니면 "없음")`,
   `목적: ...`,
-  `추천 질문: ...`,
-  `추천 카드 수: ...`,
+  `추천 질문: (추가 카드로 확인할 질문 한 문장)`,
+  `추천 카드 수: (1~3 사이 숫자, 보통 1)`,
   `추천 스프레드: ...`,
   ``,
   `진행 판단 기준:`,
@@ -680,30 +748,72 @@ export async function requestCallFollowUp(session: CallSession, input: CallTurnI
   return parseCallReply(await runToCompletion(apiKey, messages));
 }
 
-/** Links a card drawn mid-call to the existing reading. */
-export async function requestExtraCardLink(session: CallSession, extraCard: CallExtraCard): Promise<CallReply> {
+const EXTRA_READING_FORMAT = [
+  `아래 형식으로 답해주세요. 구분자 줄은 그대로 쓰고, 앞뒤에 다른 글자를 붙이지 마세요.`,
+  ``,
+  `===카드해석===`,
+  `(추가로 뽑은 카드 각각을 "추가 카드로 확인할 질문"에 비추어 직접 해석, 카드마다 1~2문장)`,
+  `===기존카드관계===`,
+  `(기존 스프레드 카드들과 어떻게 이어지거나 대비되는지 1~2문장)`,
+  `===질문답변===`,
+  `(추가 카드로 확인할 질문에 대한 명확한 답 1~2문장. 단정하지 말고 가능성으로)`,
+  `===할말===`,
+  `(상담사가 지금 바로 읽을 2~3문장, 해요체 구어체)`,
+  `===질문유형===`,
+  `(확인 질문 / 심화 질문 / 없음)`,
+  `===다음질문===`,
+  `(꼭 필요할 때만 질문 한 문장, 아니면 "없음")`,
+  `===참고메모===`,
+  `(상담사만 보는 메모 1~3줄)`,
+  `===새사실===`,
+  `("없음" 또는 내담자가 실제로 말한 사실)`,
+  `===다음진행===`,
+  `(상담 계속 / 상담 마무리 가능 중 하나)`,
+  `===카드제안===`,
+  `아니오`,
+  ``,
+  `원칙:`,
+  `- 반드시 아래 "추가 카드로 확인할 질문"을 기준으로 해석하세요. 질문을 바꾸거나 넓히지 마세요.`,
+  `- 이번 응답에서는 추가 카드를 또 제안하지 마세요.`,
+  `- 기존 해석을 뒤집기보다 보완하는 용도로 읽되, 내담자의 실제 발언과 맞지 않는 부분은 조정하세요.`,
+  ...CALL_QUESTION_RULES.slice(1),
+  ...CALL_READING_RULES.slice(1),
+].join("\n");
+
+/** Reads the extra cards drawn for an accepted proposal, always against the stored question. */
+export async function requestExtraCardReading(
+  session: CallSession,
+  flow: Pick<ExtraCardFlow, "question" | "purpose" | "cardIds">,
+): Promise<CallReply> {
+  if (flow.cardIds.length === 0) throw new Error("추가 카드를 먼저 선택해주세요.");
+  if (!flow.question.trim()) throw new Error("추가 카드로 확인할 질문을 입력해주세요.");
   const spread = requireSpread(session.spreadId);
   const apiKey = requireApiKey();
   const cards = buildCallCardLines(session, spread);
   const messages = buildCallConversationSoFar(session, spread, cards);
 
-  const card = CARDS_BY_ID[extraCard.cardId];
   messages.push({
     role: "user",
     content: [
       buildContextBlock(session),
       ``,
       `[추가 카드]`,
-      `상담사가 카드를 한 장 더 뽑았어요: ${card?.nameKo ?? "?"}`,
-      `뽑은 목적/질문: ${extraCard.label}`,
-      `이 카드는 "추가 카드" 자리입니다. 기존 배열의 자리·카드들과의 관계 속에서 이 질문에`,
-      `답하되, 기존 해석을 뒤집기보다 보완하는 용도로 읽어주세요.`,
+      `추가 카드로 확인할 질문: ${flow.question.trim()}`,
+      `뽑는 목적: ${flow.purpose?.trim() || "(상담사가 따로 적지 않음)"}`,
+      `새로 뽑은 카드 (추가 카드 자리, 기존 스프레드 카드와 별개):`,
+      ...flow.cardIds.map((id, i) => `추가 카드 ${i + 1}: ${CARDS_BY_ID[id]?.nameKo ?? id}`),
       ``,
-      CALL_REPLY_FORMAT,
+      EXTRA_READING_FORMAT,
     ].join("\n"),
   });
 
-  return parseCallReply(await runToCompletion(apiKey, messages));
+  const reply = parseCallReply(await runToCompletion(apiKey, messages));
+  return {
+    ...reply,
+    cardProposed: false,
+    extraCardSuggestion: undefined,
+    next: reply.next === "extra-card" ? "continue" : reply.next,
+  };
 }
 
 /** A 20~30 second wrap-up built only from what was already read and said in this call. */

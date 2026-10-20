@@ -15,6 +15,7 @@ import type { FollowUp, Reading, SessionInfo } from "./lib/types";
 import { listReadings, saveReading, deleteReading } from "./lib/storage";
 import { requestInterpretation, requestFollowUp } from "./lib/ai";
 import { hasApiKey } from "./lib/settings";
+import { loadCallDraft } from "./lib/callStorage";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -29,7 +30,8 @@ function newReadingId(): string {
 type Step = "setup" | "board";
 
 export default function App() {
-  const [appMode, setAppMode] = useState<"study" | "call">("study");
+  // A phone consultation interrupted by a refresh reopens in call mode.
+  const [appMode, setAppMode] = useState<"study" | "call">(() => (loadCallDraft() ? "call" : "study"));
   const [step, setStep] = useState<Step>("setup");
   const [readings, setReadings] = useState<Reading[]>(() => listReadings());
 

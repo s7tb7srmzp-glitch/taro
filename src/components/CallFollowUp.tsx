@@ -1,13 +1,18 @@
 import { useState } from "react";
 import type { CallReaction } from "../lib/types";
 import { GUIDE_KIND_TEXT, NEXT_TEXT } from "../lib/callText";
+import { CARDS_BY_ID } from "../data/cards";
 
 interface CallFollowUpProps {
   reactions: CallReaction[];
-  onDrawExtra: (label: string) => void;
+}
+
+function cardNames(ids: string[]): string {
+  return ids.map((id) => CARDS_BY_ID[id]?.nameKo ?? id).join(", ");
 }
 
 function inputSummary(r: CallReaction): string {
+  if (r.extraReading) return `🃏 추가 카드 · ${r.extraReading.question} → ${cardNames(r.extraReading.cardIds)}`;
   if (r.kind === "extra-card" || r.question.startsWith("[카드 추가]")) {
     return `🃏 ${r.question.replace(/^\[카드 추가\]\s*/, "")}`;
   }
@@ -19,7 +24,7 @@ function inputSummary(r: CallReaction): string {
 }
 
 /** Bottom of the call screen: the newest suggested script, plus folded history. */
-export function CallFollowUp({ reactions, onDrawExtra }: CallFollowUpProps) {
+export function CallFollowUp({ reactions }: CallFollowUpProps) {
   const [showOlder, setShowOlder] = useState(false);
   const latest = reactions[reactions.length - 1];
   if (!latest) return null;
@@ -28,6 +33,20 @@ export function CallFollowUp({ reactions, onDrawExtra }: CallFollowUpProps) {
   return (
     <div className="call-followup">
       <p className="call-followup__input">{inputSummary(latest)}</p>
+
+      {latest.extraReading && (
+        <section className="call-extra-reading">
+          <h3>🃏 추가 카드 답</h3>
+          {latest.extraReading.directAnswer && <p className="call-extra-reading__answer">{latest.extraReading.directAnswer}</p>}
+          {(latest.extraReading.cards || latest.extraReading.relation) && (
+            <details className="call-fold call-fold--study">
+              <summary>카드 해석 · 기존 카드와의 관계</summary>
+              {latest.extraReading.cards && <p className="call-fold__body-text">{latest.extraReading.cards}</p>}
+              {latest.extraReading.relation && <p className="call-fold__body-text">{latest.extraReading.relation}</p>}
+            </details>
+          )}
+        </section>
+      )}
 
       <section className="call-say">
         <h3>🗣 지금 상담사가 할 말</h3>
@@ -60,43 +79,8 @@ export function CallFollowUp({ reactions, onDrawExtra }: CallFollowUpProps) {
         </div>
       )}
 
-      {latest.next === "extra-card" && latest.extraCardSuggestion && (
-        <div className="call-suggest">
-          <h4>🃏 추가 카드 검토</h4>
-          <dl>
-            {latest.extraCardSuggestion.purpose && (
-              <>
-                <dt>목적</dt>
-                <dd>{latest.extraCardSuggestion.purpose}</dd>
-              </>
-            )}
-            {latest.extraCardSuggestion.question && (
-              <>
-                <dt>추천 질문</dt>
-                <dd>{latest.extraCardSuggestion.question}</dd>
-              </>
-            )}
-            {latest.extraCardSuggestion.count && (
-              <>
-                <dt>카드 수</dt>
-                <dd>{latest.extraCardSuggestion.count}</dd>
-              </>
-            )}
-            {latest.extraCardSuggestion.spread && (
-              <>
-                <dt>스프레드</dt>
-                <dd>{latest.extraCardSuggestion.spread}</dd>
-              </>
-            )}
-          </dl>
-          <button
-            type="button"
-            className="btn no-print"
-            onClick={() => onDrawExtra(latest.extraCardSuggestion!.question || latest.extraCardSuggestion!.purpose)}
-          >
-            이 질문으로 카드 뽑기
-          </button>
-        </div>
+      {latest.proposalSuppressed && (
+        <p className="call-followup__suppressed">ℹ️ 추가 카드 제안은 생략했어요 · {latest.proposalSuppressed}</p>
       )}
 
       {older.length > 0 && (
