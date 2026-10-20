@@ -8,9 +8,10 @@ import type {
   CallSession,
   ExtraCardFlow,
   ExtraCardSuggestion,
+  FollowReadingKind,
   Reading,
 } from "./types";
-import { SPREADS_BY_ID } from "../data/spreads";
+import { SPREADS, SPREADS_BY_ID } from "../data/spreads";
 import { CARDS_BY_ID } from "../data/cards";
 import { getApiKey } from "./settings";
 
@@ -182,6 +183,7 @@ const REPLY_LABELS = [
   "다음진행",
   "카드제안",
   "추가카드",
+  "핵심결론",
   "카드해석",
   "기존카드관계",
   "질문답변",
@@ -201,13 +203,22 @@ function requireSpread(spreadId: string) {
   return spread;
 }
 
-function buildCallCardLines(session: CallSession, spread: ReturnType<typeof requireSpread>): CallCardLine[] {
+/** Position label, weight and card for each filled position of a registered spread. */
+function spreadCardLines(spread: ReturnType<typeof requireSpread>, placements: Record<string, string>): CallCardLine[] {
   return spread.positions
-    .filter((p) => session.placements[p.id])
+    .filter((p) => placements[p.id])
     .map((p) => {
-      const card = CARDS_BY_ID[session.placements[p.id]];
+      const card = CARDS_BY_ID[placements[p.id]];
       return { position: p.label, weight: p.weight ?? 2, card: card?.nameKo ?? "?" };
     });
+}
+
+function buildCallCardLines(session: CallSession, spread: ReturnType<typeof requireSpread>): CallCardLine[] {
+  return spreadCardLines(spread, session.placements);
+}
+
+function formatCardLines(cards: CallCardLine[]): string {
+  return cards.map((c) => `- ${c.position} (비중 ${c.weight}/3, 3이 핵심): ${c.card}`).join("\n");
 }
 
 /** Extra reading instructions for spreads whose structure needs a specific comparison. */
@@ -250,9 +261,7 @@ const CALL_QUESTION_RULES = [
 ];
 
 function buildCallScriptPrompt(session: CallSession, spreadId: string, spreadName: string, cards: CallCardLine[]): string {
-  const cardLines = cards
-    .map((c) => `- ${c.position} (비중 ${c.weight}/3, 3이 핵심): ${c.card}`)
-    .join("\n");
+  const cardLines = formatCardLines(cards);
   const guidance = CALL_SPREAD_GUIDANCE[spreadId];
 
   return [
@@ -430,20 +439,45 @@ export function parseCallScript(raw: string): CallScript {
   };
 }
 
+/** Finds the registered spread an AI suggestion names (exact name, or the name before any parenthesis). */
+function matchSpreadId(text: string): string | undefined {
+  const squash = (t: string) => t.replace(/[\s·—-]/g, "");
+  const t = squash(text);
+  if (!t) return undefined;
+  const byLength = [...SPREADS].sort((a, b) => b.name.length - a.name.length);
+  return (
+    byLength.find((s) => t.includes(squash(s.name)))?.id ??
+    byLength.find((s) => {
+      const base = squash(s.name.split("(")[0]);
+      return base.length >= 3 && (t.includes(base) || base.startsWith(t));
+    })?.id
+  );
+}
+
 function parseExtraCardSuggestion(text: string | undefined): ExtraCardSuggestion | undefined {
   if (isNone(text)) return undefined;
   const pick = (label: RegExp) => {
-    const line = text!.split("\n").find((l) => label.test(l));
+    const line = text!.split("\n").find((l) => label.test(l.split(/[:：]/)[0]));
     return line ? line.replace(/^\s*(?:[-·•*]\s*)?[^:：]*[:：]\s*/, "").trim() : "";
   };
   const count = pick(/카드\s*수|장\s*수/);
   const n = parseInt(count.replace(/[^0-9]/g, ""), 10);
-  const suggestion = {
+  const spread = pick(/스프레드|배열/);
+  const kindText = pick(/유형/);
+  const spreadId = isNone(spread) ? undefined : matchSpreadId(spread);
+  const kind: FollowReadingKind | undefined = /스프레드|배열|새/.test(kindText)
+    ? "spread"
+    : /보충|카드/.test(kindText)
+      ? "supplement"
+      : undefined;
+  const suggestion: ExtraCardSuggestion = {
     purpose: pick(/목적/),
     question: pick(/추천\s*질문|질문/),
     count,
-    spread: pick(/스프레드|배열/),
-    countNum: Number.isFinite(n) ? Math.min(3, Math.max(1, n)) : 1,
+    spread: isNone(spread) ? "" : spread,
+    countNum: Number.isFinite(n) ? Math.min(2, Math.max(1, n)) : 1,
+    kind: kind ?? "supplement",
+    spreadId: (kind ?? "supplement") === "spread" ? spreadId : undefined,
   };
   return [suggestion.purpose, suggestion.question, suggestion.count, suggestion.spread].some(Boolean)
     ? suggestion
@@ -451,7 +485,8 @@ function parseExtraCardSuggestion(text: string | undefined): ExtraCardSuggestion
 }
 
 /** Fallback only: the reply text itself offers to draw another card. */
-const CARD_OFFER_RE = /(카드|한\s*장).{0,12}(더\s*)?뽑아\s*(볼까요|드릴까요|봐요|보면|볼게요|보시겠어요)|추가\s*카드.{0,8}(뽑|보)/;
+const CARD_OFFER_RE =
+  /(카드|한\s*장).{0,12}(더\s*)?뽑아\s*(볼까요|드릴까요|봐요|보면|볼게요|보시겠어요)|추가\s*카드.{0,8}(뽑|보)|(스프레드|배열|카드).{0,8}(새로|다시)?\s*펼쳐\s*(볼까요|드릴까요|봐요|보면)/;
 
 export function parseCallReply(raw: string): CallReply {
   const s = parseSections(raw, REPLY_LABELS);
@@ -480,9 +515,10 @@ export function parseCallReply(raw: string): CallReply {
     explicitYes || (!explicitNo && (parseNext(s["다음진행"]) === "extra-card" || CARD_OFFER_RE.test(answer)));
   const next = cardProposed ? "extra-card" : parseNext(s["다음진행"]) === "extra-card" ? "continue" : parseNext(s["다음진행"]);
   const qKind = parseGuideKind(s["질문유형"]);
+  const conclusion = s["핵심결론"] ?? s["질문답변"];
   const reading =
-    s["카드해석"] || s["기존카드관계"] || s["질문답변"]
-      ? { cards: s["카드해석"] ?? "", relation: s["기존카드관계"] ?? "", directAnswer: s["질문답변"] ?? "" }
+    s["카드해석"] || s["기존카드관계"] || conclusion
+      ? { cards: s["카드해석"] ?? "", relation: s["기존카드관계"] ?? "", directAnswer: conclusion ?? "" }
       : undefined;
 
   return {
@@ -500,7 +536,7 @@ export function parseCallReply(raw: string): CallReply {
     next,
     cardProposed,
     extraCardSuggestion: cardProposed
-      ? (suggestion ?? { purpose: "", question: "", count: "1장", spread: "원 카드", countNum: 1 })
+      ? (suggestion ?? { purpose: "", question: "", count: "1장", spread: "", countNum: 1, kind: "supplement" })
       : undefined,
     extraReading: reading,
   };
@@ -522,8 +558,30 @@ export function parseCallClosing(raw: string): CallClosing {
   };
 }
 
+function followReadingOf(session: CallSession, r: CallReaction) {
+  return r.readingId ? session.followReadings?.find((x) => x.id === r.readingId) : undefined;
+}
+
+function cardNames(ids: string[]): string {
+  return ids.map((id) => CARDS_BY_ID[id]?.nameKo ?? id).join(", ");
+}
+
+/** One-line description of a follow-up reading: its type, spread and cards, with position labels. */
+function describeFollowReading(reading: NonNullable<CallSession["followReadings"]>[number]): string {
+  if (reading.kind === "spread" && reading.spreadId) {
+    const spread = SPREADS_BY_ID[reading.spreadId];
+    const cards = spread ? spreadCardLines(spread, reading.placements ?? {}) : [];
+    return `[후속 리딩 ${reading.order} · 새 스프레드: ${spread?.name ?? reading.spreadId}] 질문: ${reading.question} / 카드: ${cards
+      .map((c) => `${c.position}=${c.card}`)
+      .join(", ")}`;
+  }
+  return `[후속 리딩 ${reading.order} · 보충 카드] 질문: ${reading.question} / 뽑은 카드: ${cardNames(reading.cardIds ?? [])}`;
+}
+
 /** How the counselor's input for one turn is shown back to the model. */
-function describeTurn(r: CallReaction): string {
+function describeTurn(r: CallReaction, session: CallSession): string {
+  const reading = followReadingOf(session, r);
+  if (reading) return describeFollowReading(reading);
   if (r.kind === "extra-card" && r.extraReading) {
     const names = r.extraReading.cardIds.map((id) => CARDS_BY_ID[id]?.nameKo ?? id).join(", ");
     return `[추가 카드] 질문: ${r.extraReading.question} / 뽑은 카드: ${names}`;
@@ -538,9 +596,19 @@ function describeTurn(r: CallReaction): string {
   return r.question;
 }
 
-function serializeCallReaction(r: CallReaction): string {
+function serializeCallReaction(r: CallReaction, session: CallSession): string {
   const parts: string[] = [];
-  if (r.extraReading) {
+  const reading = followReadingOf(session, r);
+  if (reading) {
+    parts.push(
+      `===핵심결론===`,
+      reading.result.conclusion,
+      `===카드해석===`,
+      reading.result.cards,
+      `===기존카드관계===`,
+      reading.result.relation,
+    );
+  } else if (r.extraReading) {
     parts.push(
       `===카드해석===`,
       r.extraReading.cards,
@@ -591,8 +659,8 @@ function buildCallConversationSoFar(
       content: [
         `앞선 상담 내용 요약 (오래된 대화를 줄여서 정리한 것):`,
         ...older.map((r) => {
-          const said = r.kind === "extra-card" ? describeTurn(r) : (r.remark || r.tags?.join(", ") || r.question);
-          return `- ${r.kind === "extra-card" ? "추가 카드" : "내담자 측"}: ${clip(said, 60)} → 상담사가 한 말: ${clip(r.answer, 70)}${
+          const said = r.kind === "extra-card" ? describeTurn(r, session) : (r.remark || r.tags?.join(", ") || r.question);
+          return `- ${r.kind === "extra-card" ? "추가 리딩" : "내담자 측"}: ${clip(said, 120)} → 상담사가 한 말: ${clip(r.answer, 70)}${
             r.nextQuestion ? ` (물어본 질문: ${r.nextQuestion})` : ""
           }${r.revision ? ` [해석 수정: ${clip(r.revision, 50)}]` : ""}`;
         }),
@@ -602,8 +670,8 @@ function buildCallConversationSoFar(
   }
 
   for (const r of recent) {
-    messages.push({ role: "user", content: describeTurn(r) });
-    messages.push({ role: "assistant", content: serializeCallReaction(r) });
+    messages.push({ role: "user", content: describeTurn(r, session) });
+    messages.push({ role: "assistant", content: serializeCallReaction(r, session) });
   }
 
   return messages;
@@ -623,11 +691,20 @@ function extraCardHistoryLines(session: CallSession): string[] {
   const drawn = log.filter((e) => e.outcome === "drawn").map((e) => e.question);
   const refused = log.filter((e) => e.outcome !== "drawn").map((e) => e.question).filter(Boolean);
   const lines: string[] = [];
-  if (drawn.length) lines.push([`이미 추가 카드를 뽑은 질문 (같은 질문으로 다시 제안하지 마세요):`, ...drawn.map((q) => `· ${q}`)].join("\n"));
-  if (refused.length) lines.push([`내담자가 거절했거나 넘어간 추가 카드 제안 (반복하지 마세요):`, ...refused.map((q) => `· ${q}`)].join("\n"));
+  if (drawn.length) lines.push([`이미 후속 리딩을 한 질문 (같은 질문으로 다시 제안하지 마세요):`, ...drawn.map((q) => `· ${q}`)].join("\n"));
+  if (refused.length) lines.push([`내담자가 거절했거나 넘어간 후속 리딩 제안 (반복하지 마세요):`, ...refused.map((q) => `· ${q}`)].join("\n"));
+  const readings = session.followReadings ?? [];
+  if (readings.length) {
+    lines.push(
+      [
+        `이전 후속 리딩 (각각 자기 질문과 자기 스프레드 기준으로 읽은 결과):`,
+        ...readings.map((x) => `· ${describeFollowReading(x)} → 결론: ${clip(x.result.conclusion, 90)}`),
+      ].join("\n"),
+    );
+  }
   const last = (session.reactions ?? []).at(-1);
-  if (last?.kind === "extra-card" && last.extraReading) {
-    lines.push(`직전에 추가 카드를 해석했어요. 완전히 새로운 주제가 아니면 이번에는 추가 카드를 제안하지 마세요.`);
+  if (last?.kind === "extra-card" && (last.extraReading || last.readingId)) {
+    lines.push(`직전에 후속 리딩을 해석했어요. 완전히 새로운 주제가 아니면 이번에는 카드나 리딩을 또 제안하지 마세요.`);
   }
   return lines;
 }
@@ -646,8 +723,8 @@ function buildContextBlock(session: CallSession): string {
       ? [`이미 한 질문 (다시 묻지 마세요):`, ...asked.map((q) => `· ${q}`)].join("\n")
       : `이미 한 질문: 없음`,
     extras.length
-      ? [`추가로 뽑은 카드:`, ...extras.map((x) => `· ${CARDS_BY_ID[x.cardId]?.nameKo ?? x.cardId} — ${x.label}`)].join("\n")
-      : `추가로 뽑은 카드: 없음`,
+      ? [`보충으로 뽑은 카드 (최초 스프레드 밖):`, ...extras.map((x) => `· ${CARDS_BY_ID[x.cardId]?.nameKo ?? x.cardId} — ${x.label}`)].join("\n")
+      : `보충으로 뽑은 카드: 없음`,
     ...extraCardHistoryLines(session),
     `주의: 앞선 AI 해석은 카드가 보여주는 가능성일 뿐 확정된 사실이 아니에요. 내담자의 실제 발언과`,
     `맞지 않으면 해석을 조정하거나 불확실하다고 분명히 말하세요.`,
@@ -677,19 +754,23 @@ const CALL_REPLY_FORMAT = [
   `===다음진행===`,
   `(상담 계속 / 추가 카드 검토 / 상담 마무리 가능 중 하나. 상담사에게 주는 권고일 뿐입니다.)`,
   `===카드제안===`,
-  `(예 / 아니오. 할말에서 카드를 더 뽑아보자고 말했다면 반드시 "예", 그렇지 않으면 "아니오")`,
+  `(예 / 아니오. 후속 리딩(카드를 더 뽑거나 새 스프레드를 펼치는 것)을 제안할 때만 "예".`,
+  `할말에서 카드를 더 뽑거나 새로 펼쳐보자고 말했다면 반드시 "예", 그렇지 않으면 "아니오")`,
   `===추가카드===`,
-  `(카드제안이 "예"일 때만 아래 네 줄, 아니면 "없음")`,
+  `(카드제안이 "예"일 때만 아래 다섯 줄, 아니면 "없음")`,
+  `추천 유형: (보충 카드 / 새 스프레드 중 하나)`,
   `목적: ...`,
-  `추천 질문: (추가 카드로 확인할 질문 한 문장)`,
-  `추천 카드 수: (1~3 사이 숫자, 보통 1)`,
-  `추천 스프레드: ...`,
+  `추천 질문: (후속 리딩으로 확인할 질문 한 문장)`,
+  `추천 카드 수: (보충 카드일 때 1 또는 2, 보통 1)`,
+  `추천 스프레드: (새 스프레드일 때만 다음 이름 중 하나를 그대로, 아니면 "없음": ${SPREADS.map((s) => s.name).join(" / ")})`,
   ``,
   `진행 판단 기준:`,
   `- 추가 카드 검토는 기존 카드로 답하기 어려운 새 질문이 나왔을 때, 특정 선택의 조건이나`,
   `  장애물을 더 구체적으로 봐야 할 때, 내담자가 확인하고 싶은 주제를 분명히 말했을 때만`,
   `  권하세요. 기존 카드로 충분히 설명할 수 있거나, 같은 질문이 반복되거나, 상담 시간을`,
   `  늘리기 위한 경우에는 권하지 마세요.`,
+  `- 기존 리딩의 특정 부분을 보완하면 되는 경우는 "보충 카드", 최초 질문과 다른 새 질문이라 자리`,
+  `  의미가 있는 배열이 필요한 경우는 "새 스프레드"를 추천하세요. 추천일 뿐 상담사가 정합니다.`,
   `- 원래 질문에 이미 충분히 답했거나 추가 질문의 필요성이 낮으면 "상담 마무리 가능"을 고르고,`,
   `  질문을 억지로 만들지 마세요.`,
   ``,
@@ -748,63 +829,97 @@ export async function requestCallFollowUp(session: CallSession, input: CallTurnI
   return parseCallReply(await runToCompletion(apiKey, messages));
 }
 
-const EXTRA_READING_FORMAT = [
-  `아래 형식으로 답해주세요. 구분자 줄은 그대로 쓰고, 앞뒤에 다른 글자를 붙이지 마세요.`,
-  ``,
-  `===카드해석===`,
-  `(추가로 뽑은 카드 각각을 "추가 카드로 확인할 질문"에 비추어 직접 해석, 카드마다 1~2문장)`,
-  `===기존카드관계===`,
-  `(기존 스프레드 카드들과 어떻게 이어지거나 대비되는지 1~2문장)`,
-  `===질문답변===`,
-  `(추가 카드로 확인할 질문에 대한 명확한 답 1~2문장. 단정하지 말고 가능성으로)`,
-  `===할말===`,
-  `(상담사가 지금 바로 읽을 2~3문장, 해요체 구어체)`,
-  `===질문유형===`,
-  `(확인 질문 / 심화 질문 / 없음)`,
-  `===다음질문===`,
-  `(꼭 필요할 때만 질문 한 문장, 아니면 "없음")`,
-  `===참고메모===`,
-  `(상담사만 보는 메모 1~3줄)`,
-  `===새사실===`,
-  `("없음" 또는 내담자가 실제로 말한 사실)`,
-  `===다음진행===`,
-  `(상담 계속 / 상담 마무리 가능 중 하나)`,
-  `===카드제안===`,
-  `아니오`,
-  ``,
-  `원칙:`,
-  `- 반드시 아래 "추가 카드로 확인할 질문"을 기준으로 해석하세요. 질문을 바꾸거나 넓히지 마세요.`,
-  `- 이번 응답에서는 추가 카드를 또 제안하지 마세요.`,
-  `- 기존 해석을 뒤집기보다 보완하는 용도로 읽되, 내담자의 실제 발언과 맞지 않는 부분은 조정하세요.`,
-  ...CALL_QUESTION_RULES.slice(1),
-  ...CALL_READING_RULES.slice(1),
-].join("\n");
+function followReadingFormat(kind: FollowReadingKind): string {
+  return [
+    `아래 형식으로 답해주세요. 구분자 줄은 그대로 쓰고, 앞뒤에 다른 글자를 붙이지 마세요.`,
+    ``,
+    `===핵심결론===`,
+    `(후속 질문에 대한 핵심 결론 2~3문장. 첫 문장에서 후속 질문에 직접 답하고, 단정하지 말고 가능성으로)`,
+    `===카드해석===`,
+    kind === "spread"
+      ? `(이번 스프레드의 자리마다 한 줄: "자리: 카드 — 그 자리 의미로 읽은 해석")`
+      : `(보충 카드마다 1~2문장, 후속 질문에 비추어 직접 해석)`,
+    `===기존카드관계===`,
+    `(최초 리딩·이전 상담과 이어지는 부분 1~2문장. 방향이 다르면 다르다고 말하고 이유를 설명)`,
+    `===할말===`,
+    `(상담사가 지금 바로 읽을 2~3문장, 해요체 구어체)`,
+    `===질문유형===`,
+    `(확인 질문 / 심화 질문 / 없음)`,
+    `===다음질문===`,
+    `(꼭 필요할 때만 질문 한 문장, 아니면 "없음")`,
+    `===참고메모===`,
+    `(상담사만 보는 메모 1~3줄)`,
+    `===새사실===`,
+    `("없음" 또는 내담자가 실제로 말한 사실)`,
+    `===다음진행===`,
+    `(상담 계속 / 상담 마무리 가능 중 하나)`,
+    `===카드제안===`,
+    `아니오`,
+    ``,
+    `원칙:`,
+    `- 반드시 위 "후속 질문"에 먼저 답하세요. 질문을 바꾸거나 넓히지 마세요.`,
+    ...(kind === "spread"
+      ? [
+          `- 이번 스프레드의 자리 의미와 비중만 적용하세요. 최초 스프레드나 이전 후속 리딩의 자리 의미·`,
+          `  비중을 섞지 마세요. 이전 리딩의 카드 해석은 참고만 하세요.`,
+          `- 이전 리딩과 다른 방향이 나오면 억지로 맞추지 말고, 질문과 자리의 차이 때문에 다르게`,
+          `  보일 수 있다고 설명하세요.`,
+        ]
+      : [
+          `- 보충 카드는 최초 리딩의 해당 부분을 보완하는 용도로 읽되, 내담자의 실제 발언과 맞지 않는`,
+          `  부분은 조정하세요.`,
+        ]),
+    `- 이번 응답에서는 카드를 더 뽑거나 다른 스프레드를 펼치자고 제안하지 마세요.`,
+    ...CALL_QUESTION_RULES.slice(1),
+    ...CALL_READING_RULES.slice(1),
+  ].join("\n");
+}
 
-/** Reads the extra cards drawn for an accepted proposal, always against the stored question. */
-export async function requestExtraCardReading(
-  session: CallSession,
-  flow: Pick<ExtraCardFlow, "question" | "purpose" | "cardIds">,
-): Promise<CallReply> {
-  if (flow.cardIds.length === 0) throw new Error("추가 카드를 먼저 선택해주세요.");
-  if (!flow.question.trim()) throw new Error("추가 카드로 확인할 질문을 입력해주세요.");
+export type FollowReadingRequest = Pick<
+  ExtraCardFlow,
+  "kind" | "question" | "purpose" | "cardIds" | "spreadId" | "placements"
+>;
+
+/**
+ * Reads a follow-up: supplement cards or a whole new registered spread, always against the stored
+ * follow-up question, with the initial reading and conversation as context.
+ */
+export async function requestFollowReading(session: CallSession, flow: FollowReadingRequest): Promise<CallReply> {
+  const kind = flow.kind ?? "supplement";
+  if (!flow.question.trim()) throw new Error("후속 질문을 입력해주세요.");
+  let readingLines: string[];
+  if (kind === "spread") {
+    if (!flow.spreadId) throw new Error("새 스프레드를 먼저 골라주세요.");
+    const next = requireSpread(flow.spreadId);
+    const placements = flow.placements ?? {};
+    const missing = next.positions.filter((p) => !p.optional && !placements[p.id]);
+    if (missing.length > 0) throw new Error(`아직 카드를 고르지 않은 자리가 ${missing.length}곳 있어요.`);
+    readingLines = [
+      `[후속 리딩 — 새 스프레드]`,
+      `후속 질문: ${flow.question.trim()}`,
+      `목적: ${flow.purpose?.trim() || "(상담사가 따로 적지 않음)"}`,
+      `새 스프레드: ${next.name} — ${next.summary}`,
+      `이번 스프레드의 자리와 카드 (자리: 카드, 이 자리 의미와 비중으로만 읽으세요):`,
+      formatCardLines(spreadCardLines(next, placements)),
+      ...(CALL_SPREAD_GUIDANCE[next.id] ? [``, ...CALL_SPREAD_GUIDANCE[next.id]] : []),
+    ];
+  } else {
+    if (flow.cardIds.length === 0) throw new Error("보충 카드를 먼저 선택해주세요.");
+    readingLines = [
+      `[후속 리딩 — 보충 카드]`,
+      `후속 질문: ${flow.question.trim()}`,
+      `목적: ${flow.purpose?.trim() || "(상담사가 따로 적지 않음)"}`,
+      `새로 뽑은 보충 카드 (최초 스프레드 카드와 별개):`,
+      ...flow.cardIds.map((id, i) => `보충 카드 ${i + 1}: ${CARDS_BY_ID[id]?.nameKo ?? id}`),
+    ];
+  }
+
   const spread = requireSpread(session.spreadId);
   const apiKey = requireApiKey();
-  const cards = buildCallCardLines(session, spread);
-  const messages = buildCallConversationSoFar(session, spread, cards);
-
+  const messages = buildCallConversationSoFar(session, spread, buildCallCardLines(session, spread));
   messages.push({
     role: "user",
-    content: [
-      buildContextBlock(session),
-      ``,
-      `[추가 카드]`,
-      `추가 카드로 확인할 질문: ${flow.question.trim()}`,
-      `뽑는 목적: ${flow.purpose?.trim() || "(상담사가 따로 적지 않음)"}`,
-      `새로 뽑은 카드 (추가 카드 자리, 기존 스프레드 카드와 별개):`,
-      ...flow.cardIds.map((id, i) => `추가 카드 ${i + 1}: ${CARDS_BY_ID[id]?.nameKo ?? id}`),
-      ``,
-      EXTRA_READING_FORMAT,
-    ].join("\n"),
+    content: [buildContextBlock(session), ``, ...readingLines, ``, followReadingFormat(kind)].join("\n"),
   });
 
   const reply = parseCallReply(await runToCompletion(apiKey, messages));

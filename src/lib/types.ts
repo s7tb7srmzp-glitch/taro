@@ -61,13 +61,20 @@ export interface CallNotes {
 /** AI's recommendation for the counselor; the counselor decides. */
 export type CallNext = "continue" | "extra-card" | "close";
 
+/** A follow-up reading either supplements the existing reading with 1~2 cards or lays out a new spread. */
+export type FollowReadingKind = "supplement" | "spread";
+
 export interface ExtraCardSuggestion {
   purpose: string;
   question: string;
   count: string;
   spread: string;
-  /** Parsed card count (1~3); absent on suggestions saved before this existed. */
+  /** Parsed card count (1~2); absent on suggestions saved before this existed. */
   countNum?: number;
+  /** AI's recommended type; the counselor can always pick the other one. */
+  kind?: FollowReadingKind;
+  /** Registered spread matched from `spread`, when a new spread was recommended. */
+  spreadId?: string;
 }
 
 /**
@@ -80,13 +87,22 @@ export interface ExtraCardFlow {
   id: string;
   status: ExtraFlowStatus;
   source: "ai" | "manual";
+  /** Undefined until the counselor picks a type (a manual start asks first). */
+  kind?: FollowReadingKind;
+  /** What the AI recommended, shown as a hint only. */
+  suggestedKind?: FollowReadingKind;
   /** The question the extra cards answer. Fixed once accepted unless the counselor edits it. */
   question: string;
   purpose: string;
   count: number;
   spread: string;
-  /** Cards picked so far, in order. Kept across cancel, API errors and reloads. */
+  /** Supplement cards picked so far, in order. Kept across cancel, API errors and reloads. */
   cardIds: string[];
+  /** New-spread mode: the chosen registered spread and its positionId -> cardId. */
+  spreadId?: string;
+  placements?: Record<string, string>;
+  /** New-spread mode: the position whose card is being picked. */
+  activeSlotId?: string;
   /** How the client's acceptance was registered. */
   acceptedBy?: "button" | "remark";
   error?: string;
@@ -100,6 +116,9 @@ export interface ExtraCardLogEntry {
   source: "ai" | "manual";
   outcome: "drawn" | "declined" | "dismissed";
   acceptedBy?: "button" | "remark";
+  kind?: FollowReadingKind;
+  spreadId?: string;
+  readingId?: string;
   cardIds?: string[];
   at: string;
 }
@@ -111,6 +130,36 @@ export interface ExtraCardReading {
   cards: string;
   relation: string;
   directAnswer: string;
+}
+
+/** What a follow-up reading produced, ready to be read aloud. */
+export interface FollowReadingResult {
+  /** Core conclusion answering the follow-up question. */
+  conclusion: string;
+  /** Card-by-card reading (by position for a new spread). */
+  cards: string;
+  /** How it connects to the initial reading and the conversation so far. */
+  relation: string;
+  /** Short script the counselor can say right away. */
+  script: string;
+  nextQuestion?: string;
+}
+
+/** One follow-up reading inside a call. The initial reading is the session's own spread + script. */
+export interface CallFollowReading {
+  id: string;
+  /** 1-based order among follow-up readings. */
+  order: number;
+  kind: FollowReadingKind;
+  question: string;
+  purpose?: string;
+  /** New spread: registered spread id and its positionId -> cardId. */
+  spreadId?: string;
+  placements?: Record<string, string>;
+  /** Supplement: cards drawn, in order. */
+  cardIds?: string[];
+  result: FollowReadingResult;
+  createdAt: string;
 }
 
 /** The 20~30 second wrap-up generated when the counselor ends the call. */
@@ -152,6 +201,8 @@ export interface CallReaction extends FollowUp {
   /** Set when an AI card proposal was not shown because it repeated an earlier one. */
   proposalSuppressed?: string;
   extraReading?: ExtraCardReading;
+  /** Set on the turn produced by a follow-up reading (see CallSession.followReadings). */
+  readingId?: string;
 }
 
 export interface CallSession {
@@ -169,6 +220,8 @@ export interface CallSession {
   closing?: CallClosing;
   extraFlow?: ExtraCardFlow;
   extraCardLog?: ExtraCardLogEntry[];
+  /** Follow-up readings in the order they were made; never overwrites the initial reading. */
+  followReadings?: CallFollowReading[];
   createdAt: string;
 }
 

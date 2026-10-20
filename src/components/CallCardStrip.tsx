@@ -10,10 +10,12 @@ interface CallCardStripProps {
   spread: SpreadTemplate;
   placements: Record<string, string>;
   extraCards: CallExtraCard[];
-  onSlotClick: (positionId: string) => void;
+  /** Omit for a read-only strip (e.g. a past follow-up reading). */
+  onSlotClick?: (positionId: string) => void;
+  title?: string;
 }
 
-export function CallCardStrip({ spread, placements, extraCards, onSlotClick }: CallCardStripProps) {
+export function CallCardStrip({ spread, placements, extraCards, onSlotClick, title = "카드 배열" }: CallCardStripProps) {
   const [expanded, setExpanded] = useState(false);
   const placed = spread.positions.filter((p) => placements[p.id]);
 
@@ -31,7 +33,9 @@ export function CallCardStrip({ spread, placements, extraCards, onSlotClick }: C
   return (
     <div className="call-card-strip">
       <div className="call-card-strip__header">
-        <span className="call-card-strip__title">카드 배열 · {spread.name}</span>
+        <span className="call-card-strip__title">
+          {title} · {spread.name}
+        </span>
         <button type="button" className="btn btn--ghost call-card-strip__toggle" onClick={() => setExpanded((v) => !v)}>
           {expanded ? "접기" : "크게 보기"}
         </button>
@@ -39,8 +43,8 @@ export function CallCardStrip({ spread, placements, extraCards, onSlotClick }: C
 
       {expanded ? (
         <>
-          <SpreadBoard spread={spread} placements={placements} onSlotClick={onSlotClick} />
-          <p className="call-card-strip__note">카드를 바꾸면 대본을 다시 생성해주세요.</p>
+          <SpreadBoard spread={spread} placements={placements} onSlotClick={onSlotClick ?? (() => {})} />
+          {onSlotClick && <p className="call-card-strip__note">카드를 바꾸면 대본을 다시 생성해주세요.</p>}
           {extraItems.length > 0 && <ul className="call-card-strip__list">{extraItems}</ul>}
         </>
       ) : (

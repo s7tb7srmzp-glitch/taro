@@ -1343,6 +1343,137 @@ h2 {
   flex: 1 1 auto;
 }
 
+/* follow-up reading: type choice, new spread, reading switcher */
+.call-follow-kind {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.call-follow-kind__option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.call-follow-kind__option--on {
+  border-color: rgba(190, 150, 240, 0.9);
+  background: rgba(122, 79, 176, 0.45);
+}
+
+.call-follow-kind__option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.call-follow-kind__title {
+  font-weight: 600;
+  font-size: 0.92rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.call-follow-kind__ai {
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(244, 233, 216, 0.18);
+}
+
+.call-follow-kind__desc {
+  font-size: 0.76rem;
+  opacity: 0.7;
+  line-height: 1.4;
+}
+
+.call-follow-spread__name {
+  font-weight: 600;
+}
+
+.call-follow-spread__change {
+  padding: 4px 10px;
+  font-size: 0.8rem;
+}
+
+.call-follow-spread__picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.call-follow-spread {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.call-reading-nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.call-reading-nav__item {
+  flex: 0 0 auto;
+  max-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(244, 233, 216, 0.25);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.call-reading-nav__item--on {
+  border-color: rgba(190, 150, 240, 0.9);
+  background: rgba(122, 79, 176, 0.4);
+}
+
+.call-reading-nav__title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.call-reading-nav__question {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.call-follow-reading__meta {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.call-follow-reading__question {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
 .call-extra-reading {
   display: flex;
   flex-direction: column;

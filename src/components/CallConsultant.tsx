@@ -4,7 +4,8 @@ import { SpreadPicker } from "./SpreadPicker";
 import { SpreadBoard } from "./SpreadBoard";
 import { CardPickerPanel } from "./CardPickerPanel";
 import { CallScriptPanel } from "./CallScriptPanel";
-import { CallExtraFlow } from "./CallExtraFlow";
+import { CallFollowFlow } from "./CallFollowFlow";
+import { CallReadingNav, CallFollowReadingView } from "./CallReadings";
 import { CallCardStrip } from "./CallCardStrip";
 import { CallInterpretation } from "./CallInterpretation";
 import { CallGuide } from "./CallGuide";
@@ -16,6 +17,7 @@ import { SPREADS_BY_ID } from "../data/spreads";
 import type {
   CallClosing,
   CallExtraCard,
+  CallFollowReading,
   CallReaction,
   CallReply,
   CallScript,
@@ -34,9 +36,10 @@ import {
   loadCallDraft,
   clearCallDraft,
 } from "../lib/callStorage";
-import { requestCallScript, requestCallFollowUp, requestExtraCardReading, requestCallClosing } from "../lib/ai";
+import { requestCallScript, requestCallFollowUp, requestFollowReading, requestCallClosing } from "../lib/ai";
 import type { CallTurnInput } from "../lib/ai";
 import { classifyProposalAnswer, findRepeatedQuestion } from "../lib/callText";
+import { flowMissingSlots, settledStatus } from "../lib/followReading";
 import { hasApiKey } from "../lib/settings";
 
 function todayIso(): string {
@@ -55,24 +58,33 @@ function mergeFacts(existing: string[], incoming: string[]): string[] {
 }
 
 /** A flow restored from storage can't still be mid-pick or mid-request; resume it one step back. */
-function resumeFlow(flow: ExtraCardFlow | undefined): ExtraCardFlow | null {
-  if (!flow) return null;
-  if (flow.status === "selecting") return { ...flow, status: flow.cardIds.length >= flow.count ? "selected" : "accepted" };
+function resumeFlow(saved: ExtraCardFlow | undefined): ExtraCardFlow | null {
+  if (!saved) return null;
+  // Flows saved before follow-up readings existed were always supplement cards.
+  const flow: ExtraCardFlow = {
+    ...saved,
+    kind: saved.kind ?? (saved.source === "ai" || saved.cardIds.length ? "supplement" : undefined),
+    activeSlotId: undefined,
+  };
+  if (flow.status === "selecting") return { ...flow, status: settledStatus({ ...flow, status: "accepted" }) };
   if (flow.status === "interpreting") {
     return { ...flow, status: "selected", error: "해석이 끝나기 전에 화면이 닫혔어요. 다시 해석해주세요." };
   }
   return flow;
 }
 
-function logEntry(flow: ExtraCardFlow, outcome: ExtraCardLogEntry["outcome"]): ExtraCardLogEntry {
+function logEntry(flow: ExtraCardFlow, outcome: ExtraCardLogEntry["outcome"], readingId?: string): ExtraCardLogEntry {
   return {
     id: flow.id,
     question: flow.question.trim(),
     purpose: flow.purpose || undefined,
     source: flow.source,
     outcome,
-    cardIds: outcome === "drawn" ? flow.cardIds : undefined,
+    cardIds: outcome === "drawn" && flow.kind !== "spread" ? flow.cardIds : undefined,
     acceptedBy: flow.acceptedBy,
+    kind: flow.kind,
+    spreadId: flow.kind === "spread" ? flow.spreadId : undefined,
+    readingId,
     at: new Date().toISOString(),
   };
 }
@@ -112,6 +124,9 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   const [closingError, setClosingError] = useState<string | null>(null);
   const [extraFlow, setExtraFlow] = useState<ExtraCardFlow | null>(null);
   const [extraLog, setExtraLog] = useState<ExtraCardLogEntry[]>([]);
+  const [followReadings, setFollowReadings] = useState<CallFollowReading[]>([]);
+  /** Which reading the top of the screen shows; null = the initial reading. */
+  const [viewReadingId, setViewReadingId] = useState<string | null>(null);
   /** Mirrors `extraFlow` synchronously so rapid taps never act on a stale flow. */
   const extraFlowRef = useRef<ExtraCardFlow | null>(null);
   const extraBusyRef = useRef(false);
@@ -136,6 +151,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     [placements, extraCards],
   );
   const canStart = session.question.trim().length > 0 && !!spreadId;
+  const viewedReading = viewReadingId ? followReadings.find((r) => r.id === viewReadingId) : undefined;
 
   const allSlotsFilled = useMemo(() => {
     if (!spread) return false;
@@ -160,7 +176,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     if (step !== "live" || !spreadId) return;
     saveCallDraft({ call: buildSession(), saved });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, callId, session, spreadId, placements, script, reactions, extraCards, facts, closing, extraFlow, extraLog, saved]);
+  }, [step, callId, session, spreadId, placements, script, reactions, extraCards, facts, closing, extraFlow, extraLog, followReadings, saved]);
 
   useEffect(() => {
     if (!confirmRegen) return;
@@ -188,9 +204,11 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setExtraFlow(flow);
   }
 
-  function resetExtra(flow: ExtraCardFlow | null = null, log: ExtraCardLogEntry[] = []) {
+  function resetExtra(flow: ExtraCardFlow | null = null, log: ExtraCardLogEntry[] = [], readings: CallFollowReading[] = []) {
     commitFlow(flow);
     setExtraLog(log);
+    setFollowReadings(readings);
+    setViewReadingId(null);
     extraBusyRef.current = false;
   }
 
@@ -231,7 +249,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setFacts(s.facts ?? []);
     setClosing(s.closing ?? null);
     setClosingError(null);
-    resetExtra(resumeFlow(s.extraFlow), s.extraCardLog ?? []);
+    resetExtra(resumeFlow(s.extraFlow), s.extraCardLog ?? [], s.followReadings ?? []);
     setError(null);
     setSaved(isSaved);
     setStep("live");
@@ -295,6 +313,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       closing: closing ?? undefined,
       extraFlow: extraFlow ?? undefined,
       extraCardLog: extraLog,
+      followReadings,
       createdAt: new Date().toISOString(),
     };
   }
@@ -332,29 +351,34 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   }
 
   /**
-   * Turns an AI card proposal into a pending flow, unless it repeats a question already drawn or
-   * declined, a draw is already underway, or it comes right after an extra reading with nothing new.
+   * Turns an AI proposal into a pending follow-up flow, unless it repeats a question already read or
+   * declined, a reading is already underway, or it comes right after a follow-up reading with nothing new.
    */
   function proposalFromReply(reply: CallReply, ctx: ExtraContext): { flow: ExtraCardFlow | null; suppressed?: string } {
     const suggestion = reply.cardProposed ? reply.extraCardSuggestion : undefined;
     if (!suggestion) return { flow: ctx.flow };
-    if (ctx.flow && ctx.flow.status !== "proposed") return { flow: ctx.flow, suppressed: "이미 진행 중인 추가 카드가 있어요." };
+    if (ctx.flow && ctx.flow.status !== "proposed") return { flow: ctx.flow, suppressed: "이미 진행 중인 후속 리딩이 있어요." };
     const repeated = findRepeatedQuestion(suggestion.question, ctx.log.map((e) => e.question));
     if (repeated) return { flow: ctx.flow, suppressed: `이미 다룬 질문이에요 ("${repeated}").` };
     const last = reactions[reactions.length - 1];
-    if (last?.extraReading && !suggestion.question.trim()) {
-      return { flow: ctx.flow, suppressed: "방금 추가 카드를 해석했어요." };
+    if ((last?.extraReading || last?.readingId) && !suggestion.question.trim()) {
+      return { flow: ctx.flow, suppressed: "방금 후속 리딩을 해석했어요." };
     }
+    const kind = suggestion.kind ?? "supplement";
     return {
       flow: {
         id: newId("proposal"),
         status: "proposed",
         source: "ai",
+        kind,
+        suggestedKind: kind,
         question: suggestion.question,
         purpose: suggestion.purpose,
-        count: suggestion.countNum ?? 1,
+        count: Math.min(2, suggestion.countNum ?? 1),
         spread: suggestion.spread,
         cardIds: [],
+        spreadId: suggestion.spreadId,
+        placements: {},
       },
     };
   }
@@ -415,10 +439,12 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     }
   }
 
-  function updateFlow(patch: Partial<ExtraCardFlow>) {
+  /** Applies an edit to the flow while it is at rest (not picking or interpreting). */
+  function editFlow(patch: Partial<ExtraCardFlow>) {
     const flow = extraFlowRef.current;
-    if (!flow) return;
-    commitFlow({ ...flow, ...patch });
+    if (!flow || extraBusyRef.current || flow.status === "selecting" || flow.status === "interpreting") return;
+    const next: ExtraCardFlow = { ...flow, ...patch, error: undefined };
+    commitFlow({ ...next, status: settledStatus(next) });
     setSaved(false);
   }
 
@@ -430,7 +456,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     scrollTo(extraFlowElRef.current);
   }
 
-  function handleManualExtra() {
+  function handleStartFollowReading() {
     if (!extraFlowRef.current) {
       commitFlow({
         id: newId("proposal"),
@@ -441,26 +467,63 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
         count: 1,
         spread: "",
         cardIds: [],
+        placements: {},
       });
     }
     scrollTo(extraFlowElRef.current);
   }
 
-  function handleExtraPickStart() {
+  function handleSelectFollowSpread(id: string) {
     const flow = extraFlowRef.current;
-    if (!flow || extraBusyRef.current || !flow.question.trim() || flow.cardIds.length >= flow.count) return;
-    if (flow.status !== "proposed" && flow.status !== "accepted" && flow.status !== "selected") return;
+    if (!flow || flow.spreadId === id) return;
+    // Positions belong to one spread, so cards placed on another spread can't carry over.
+    editFlow({ spreadId: id, placements: {} });
+  }
+
+  /** Opening the picker counts as accepting an AI proposal by button. */
+  function startPicking(flow: ExtraCardFlow, activeSlotId?: string) {
     commitFlow({
       ...flow,
       status: "selecting",
+      activeSlotId,
       acceptedBy: flow.acceptedBy ?? (flow.source === "ai" ? "button" : undefined),
       error: undefined,
     });
   }
 
+  function canPick(flow: ExtraCardFlow | null): flow is ExtraCardFlow {
+    return (
+      !!flow &&
+      !extraBusyRef.current &&
+      !!flow.question.trim() &&
+      (flow.status === "proposed" || flow.status === "accepted" || flow.status === "selected")
+    );
+  }
+
+  function handleExtraPickStart() {
+    const flow = extraFlowRef.current;
+    if (!canPick(flow) || flow.kind !== "supplement" || flow.cardIds.length >= flow.count) return;
+    startPicking(flow);
+  }
+
+  function handleFollowSlotClick(positionId: string) {
+    const flow = extraFlowRef.current;
+    if (!canPick(flow) || flow.kind !== "spread" || !flow.spreadId) return;
+    startPicking(flow, positionId);
+  }
+
   function handleExtraPick(cardId: string) {
     const flow = extraFlowRef.current;
-    if (!flow || flow.status !== "selecting" || flow.cardIds.includes(cardId)) return;
+    if (!flow || flow.status !== "selecting") return;
+    if (flow.kind === "spread") {
+      if (!flow.activeSlotId) return;
+      const placed = { ...(flow.placements ?? {}), [flow.activeSlotId]: cardId };
+      const next: ExtraCardFlow = { ...flow, placements: placed, activeSlotId: undefined, status: "accepted" };
+      commitFlow({ ...next, status: settledStatus(next) });
+      setSaved(false);
+      return;
+    }
+    if (flow.cardIds.includes(cardId)) return;
     const cardIds = [...flow.cardIds, cardId];
     const done = cardIds.length >= flow.count;
     const next: ExtraCardFlow = { ...flow, cardIds, status: done ? "selected" : "selecting" };
@@ -469,22 +532,31 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     if (done) interpretExtra(next);
   }
 
+  function handleFollowClearSlot() {
+    const flow = extraFlowRef.current;
+    if (!flow || flow.status !== "selecting" || flow.kind !== "spread" || !flow.activeSlotId) return;
+    const placed = { ...(flow.placements ?? {}) };
+    delete placed[flow.activeSlotId];
+    commitFlow({ ...flow, placements: placed, activeSlotId: undefined, status: "accepted" });
+    setSaved(false);
+  }
+
   function handleExtraPickCancel() {
     const flow = extraFlowRef.current;
     if (!flow || flow.status !== "selecting") return;
-    commitFlow({ ...flow, status: flow.cardIds.length >= flow.count ? "selected" : "accepted" });
+    const next: ExtraCardFlow = { ...flow, activeSlotId: undefined, status: "accepted" };
+    commitFlow({ ...next, status: settledStatus(next) });
   }
 
   function handleExtraRemoveCard(index: number) {
     const flow = extraFlowRef.current;
-    if (!flow || extraBusyRef.current) return;
-    const status = flow.status === "proposed" ? "proposed" : "accepted";
-    updateFlow({ cardIds: flow.cardIds.filter((_, i) => i !== index), status, error: undefined });
+    if (!flow) return;
+    editFlow({ cardIds: flow.cardIds.filter((_, i) => i !== index) });
   }
 
   function handleExtraSkip() {
     const flow = extraFlowRef.current;
-    if (!flow || extraBusyRef.current) return;
+    if (!flow || extraBusyRef.current || flow.status === "interpreting") return;
     if (flow.question.trim() || flow.source === "ai") {
       setExtraLog((prev) => [...prev, logEntry(flow, flow.status === "proposed" ? "declined" : "dismissed")]);
     }
@@ -493,27 +565,40 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   }
 
   async function interpretExtra(flow: ExtraCardFlow) {
-    if (extraBusyRef.current || flow.cardIds.length === 0 || !flow.question.trim()) return;
+    if (extraBusyRef.current || !flow.kind || !flow.question.trim() || flowMissingSlots(flow) > 0) return;
+    if (flow.kind === "supplement" && flow.cardIds.length === 0) return;
     extraBusyRef.current = true;
     commitFlow({ ...flow, status: "interpreting", error: undefined });
     try {
-      const reply = await requestExtraCardReading(buildSession(), flow);
+      const reply = await requestFollowReading(buildSession(), flow);
       const question = flow.question.trim();
-      const note = reply.extraReading?.directAnswer || reply.answer;
-      const log = [...extraLog, logEntry(flow, "drawn")];
-      setExtraCards((prev) => [...prev, ...flow.cardIds.map((cardId) => ({ id: newId("extra"), cardId, label: question, note }))]);
-      recordReply(
-        {
-          question: `[추가 카드] ${question}`,
-          kind: "extra-card",
-          extraReading: {
-            question,
-            cardIds: flow.cardIds,
-            cards: reply.extraReading?.cards ?? "",
-            relation: reply.extraReading?.relation ?? "",
-            directAnswer: reply.extraReading?.directAnswer ?? "",
-          },
+      const reading: CallFollowReading = {
+        id: newId("reading"),
+        order: followReadings.length + 1,
+        kind: flow.kind,
+        question,
+        purpose: flow.purpose || undefined,
+        ...(flow.kind === "spread"
+          ? { spreadId: flow.spreadId, placements: { ...(flow.placements ?? {}) } }
+          : { cardIds: [...flow.cardIds] }),
+        result: {
+          conclusion: reply.extraReading?.directAnswer ?? "",
+          cards: reply.extraReading?.cards ?? "",
+          relation: reply.extraReading?.relation ?? "",
+          script: reply.answer,
+          nextQuestion: reply.nextQuestion || undefined,
         },
+        createdAt: new Date().toISOString(),
+      };
+      const log = [...extraLog, logEntry(flow, "drawn", reading.id)];
+      if (flow.kind === "supplement") {
+        const note = reading.result.conclusion || reply.answer;
+        setExtraCards((prev) => [...prev, ...flow.cardIds.map((cardId) => ({ id: newId("extra"), cardId, label: question, note }))]);
+      }
+      setFollowReadings((prev) => [...prev, reading]);
+      setViewReadingId(reading.id);
+      recordReply(
+        { question: `[후속 리딩 ${reading.order}] ${question}`, kind: "extra-card", readingId: reading.id },
         reply,
         { log, flow: null },
       );
@@ -522,7 +607,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       commitFlow({
         ...flow,
         status: "selected",
-        error: e instanceof Error ? e.message : "추가 카드 해석 중 오류가 발생했어요.",
+        error: e instanceof Error ? e.message : "후속 리딩 해석 중 오류가 발생했어요.",
       });
     } finally {
       extraBusyRef.current = false;
@@ -724,18 +809,35 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
         </>
       ) : (
         <>
-          {spread && (
-            <CallCardStrip
-              spread={spread}
-              placements={placements}
-              extraCards={extraCards}
-              onSlotClick={handleSlotClick}
+          {followReadings.length > 0 && (
+            <CallReadingNav
+              initialQuestion={session.question}
+              readings={followReadings}
+              selectedId={viewedReading?.id ?? null}
+              onSelect={setViewReadingId}
             />
           )}
 
-          <section className="call-zone" aria-label="카드 해석">
-            <CallInterpretation script={script} reactions={reactions} facts={facts} onRemoveFact={handleRemoveFact} />
-          </section>
+          {viewedReading ? (
+            <section className="call-zone" aria-label="카드 해석">
+              <CallFollowReadingView reading={viewedReading} />
+            </section>
+          ) : (
+            <>
+              {spread && (
+                <CallCardStrip
+                  spread={spread}
+                  placements={placements}
+                  extraCards={extraCards}
+                  onSlotClick={handleSlotClick}
+                />
+              )}
+
+              <section className="call-zone" aria-label="카드 해석">
+                <CallInterpretation script={script} reactions={reactions} facts={facts} onRemoveFact={handleRemoveFact} />
+              </section>
+            </>
+          )}
 
           <section className="call-zone" aria-label="상담 진행">
             <h2 className="call-zone__title">상담 진행</h2>
@@ -755,16 +857,19 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
                 내담자 반응을 입력하고 "다음 상담 대본 생성"을 누르면 여기에 할 말과 다음 질문이 나와요.
               </p>
             ) : (
-              <CallFollowUp reactions={reactions} />
+              <CallFollowUp reactions={reactions} readings={followReadings} />
             )}
             <div ref={extraFlowElRef}>
               {extraFlow && (
-                <CallExtraFlow
+                <CallFollowFlow
                   flow={extraFlow}
                   usedCardIds={usedCardIds}
-                  onEdit={updateFlow}
+                  onEdit={editFlow}
+                  onSelectSpread={handleSelectFollowSpread}
                   onPickStart={handleExtraPickStart}
+                  onSlotClick={handleFollowSlotClick}
                   onPick={handleExtraPick}
+                  onClearSlot={handleFollowClearSlot}
                   onPickCancel={handleExtraPickCancel}
                   onRemoveCard={handleExtraRemoveCard}
                   onInterpret={handleExtraInterpret}
@@ -773,8 +878,8 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
               )}
             </div>
             <div className="call-actions no-print">
-              <button type="button" className="btn btn--ghost" onClick={handleManualExtra} disabled={!!extraFlow}>
-                🃏 추가 카드 뽑기
+              <button type="button" className="btn btn--ghost" onClick={handleStartFollowReading} disabled={!!extraFlow}>
+                🔮 후속 리딩 시작
               </button>
               <button type="button" className="btn" onClick={handleCloseCall} disabled={closingLoading}>
                 {closingLoading ? "마무리 대본 만드는 중…" : closing ? "마무리 대본 다시 만들기" : "👋 상담 마무리"}

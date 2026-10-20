@@ -29,8 +29,8 @@ export type ProposalAnswer = "accept" | "decline" | "unclear" | "other";
 export function classifyProposalAnswer(text: string): ProposalAnswer {
   const t = text.trim();
   if (!t) return "other";
-  if (/안\s*뽑|뽑지\s*(말|않|마)|카드\s*(는|은)?\s*(괜찮|됐|필요\s*없)/.test(t)) return "decline";
-  if (/(뽑아|뽑을게|뽑자|뽑아\s*볼|한\s*장\s*더|카드\s*(볼게|보고\s*싶|봐\s*주|봐\s*줘|더\s*봐))/.test(t)) return "accept";
+  if (/안\s*(뽑|펼)|(뽑|펼치)지\s*(말|않|마)|카드\s*(는|은)?\s*(괜찮|됐|필요\s*없)/.test(t)) return "decline";
+  if (/(뽑아|뽑을게|뽑자|뽑아\s*볼|한\s*장\s*더|펼쳐\s*(주|봐|볼)|카드\s*(볼게|보고\s*싶|봐\s*주|봐\s*줘|더\s*봐))/.test(t)) return "accept";
   if (/^(아니|아뇨|아니요|괜찮아요|괜찮습니다|됐어요|됐습니다|싫어요|다음에)/.test(t)) return "decline";
   if (/^(네|예|응|넵|넹|좋아요|좋습니다|그래요|그럴게요|해\s*주세요|부탁드려요|부탁해요)[\s.!~,]*$/.test(t)) return "unclear";
   return "other";
