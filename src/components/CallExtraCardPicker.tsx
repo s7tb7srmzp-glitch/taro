@@ -1,17 +1,27 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CardPickerPanel } from "./CardPickerPanel";
 
 interface CallExtraCardPickerProps {
   usedCardIds: Set<string>;
   onAdd: (cardId: string, label: string) => Promise<void>;
+  /** Opens the picker with this purpose prefilled (e.g. from an AI suggestion). Bump `nonce` to reopen. */
+  request?: { label: string; nonce: number } | null;
 }
 
-export function CallExtraCardPicker({ usedCardIds, onAdd }: CallExtraCardPickerProps) {
+export function CallExtraCardPicker({ usedCardIds, onAdd, request }: CallExtraCardPickerProps) {
   const [picking, setPicking] = useState(false);
   const [pickedCardId, setPickedCardId] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!request) return;
+    setLabel(request.label);
+    setPickedCardId(null);
+    setError(null);
+    setPicking(true);
+  }, [request]);
 
   function reset() {
     setPicking(false);
@@ -37,12 +47,12 @@ export function CallExtraCardPicker({ usedCardIds, onAdd }: CallExtraCardPickerP
   return (
     <div className="call-extra-card no-print">
       <button type="button" className="btn btn--ghost" onClick={() => setPicking(true)}>
-        🃏 카드 추가 뽑기
+        🃏 추가 카드 뽑기
       </button>
 
       {picking && !pickedCardId && (
         <CardPickerPanel
-          slotLabel="추가로 뽑을 카드"
+          slotLabel={label ? `추가 카드 · ${label}` : "추가로 뽑을 카드"}
           usedCardIds={usedCardIds}
           onPick={(cardId) => setPickedCardId(cardId)}
           onClear={() => {}}
@@ -53,7 +63,7 @@ export function CallExtraCardPicker({ usedCardIds, onAdd }: CallExtraCardPickerP
       {pickedCardId && (
         <div className="call-extra-card__label-overlay" onClick={reset}>
           <div className="call-extra-card__label-panel" onClick={(e) => e.stopPropagation()}>
-            <p className="call-extra-card__label-title">왜 이 카드를 뽑았나요?</p>
+            <p className="call-extra-card__label-title">이 카드를 뽑은 목적이나 질문</p>
             <textarea
               placeholder="예) 다음 달은 어떻게 될까요?"
               rows={2}

@@ -1,4 +1,15 @@
-import type { CallExtraCard, CallReaction, CallReply, CallScript, CallSession, Reading } from "./types";
+import type {
+  CallClosing,
+  CallExtraCard,
+  CallGuideKind,
+  CallNext,
+  CallReaction,
+  CallReply,
+  CallScript,
+  CallSession,
+  ExtraCardSuggestion,
+  Reading,
+} from "./types";
 import { SPREADS_BY_ID } from "../data/spreads";
 import { CARDS_BY_ID } from "../data/cards";
 import { getApiKey } from "./settings";
@@ -147,8 +158,36 @@ export async function requestFollowUp(reading: Reading, question: string): Promi
 
 /* ---------- phone-consultation mode ---------- */
 
-const SCRIPT_LABELS = ["핵심결론", "상세설명", "질문", "마무리", "해석근거"] as const;
-const REPLY_LABELS = ["답변", "근거", "해석수정", "새사실"] as const;
+const SCRIPT_LABELS = [
+  "핵심결론",
+  "상세설명",
+  "가이드유형",
+  "가이드",
+  "마무리",
+  "카드키워드",
+  "위치근거",
+  "카드관계",
+  "결론근거",
+  "주의점",
+  "해석근거",
+  "질문",
+] as const;
+const REPLY_LABELS = [
+  "할말",
+  "질문유형",
+  "다음질문",
+  "참고메모",
+  "해석수정",
+  "새사실",
+  "다음진행",
+  "추가카드",
+  "답변",
+  "근거",
+] as const;
+const CLOSING_LABELS = ["질문요약", "핵심흐름", "확인된정보", "현실고려", "마무리멘트"] as const;
+
+/** How many recent live turns are replayed verbatim; older ones are folded into a short summary. */
+const RECENT_TURNS = 6;
 
 type CallCardLine = { position: string; weight: number; card: string };
 
@@ -183,14 +222,27 @@ const CALL_READING_RULES = [
   `해석 원칙:`,
   `- 카드 한 장의 사전적 의미보다 "그 카드가 놓인 자리의 역할"과 "카드끼리의 관계(흐름,`,
   `  대비, 충돌)"를 우선해서 읽으세요. 비중이 높은 자리를 중심축으로 삼으세요.`,
-  `- 결과 자리 카드가 긍정적이어도 과정·장애 자리에 어려움이 보이면 반드시 함께 설명하세요.`,
-  `- 부정적인 의미의 카드를 억지로 긍정적으로 바꾸지 마세요. 어려움은 어려움대로 말하고,`,
-  `  어떻게 대처할 수 있는지를 덧붙이세요.`,
+  `- 과정 자리 카드와 결과 자리 카드가 어떻게 이어지는지를 중요하게 다루세요. 결과 카드가`,
+  `  긍정적이어도 과정·장애 자리에 어려움이 보이면 반드시 함께 설명하세요.`,
+  `- "긍정 카드/부정 카드"라는 단순 분류만으로 결론을 내리지 마세요. 부정적인 의미의 카드를`,
+  `  억지로 긍정적으로 바꾸지 말고, 어려움은 어려움대로 말한 뒤 대처 방법을 덧붙이세요.`,
   `- "다 잘될 거예요" 같은 막연하고 뭉뚱그린 위로를 반복하지 마세요.`,
-  `- 카드에 나타나지 않은 사실이나 내담자·상대방의 감정을 단정하지 마세요. 상대방의 마음이나`,
-  `  미래는 "~일 가능성이 보여요"처럼 가능성과 경향으로 표현하세요.`,
+  `- 카드가 보여주는 가능성과 현실에서 확정된 사실을 구분하세요. 카드에 나타나지 않은 사실이나`,
+  `  내담자·상대방의 감정을 단정하지 말고, 상대방의 마음이나 미래는 "~일 가능성이 보여요"처럼`,
+  `  가능성과 경향으로 표현하세요. 근거 없이 미래를 단정하지 마세요.`,
   `- 의료·법률·재정적 결정을 대신 내리지 말고, 필요하면 전문가 상담을 권하세요.`,
   `- 마크다운 문법(#, *, -, --- 등)을 쓰지 말고 일반 텍스트와 줄바꿈만 사용하세요.`,
+];
+
+const CALL_QUESTION_RULES = [
+  `질문 원칙:`,
+  `- 질문은 한 번에 최대 하나만, 꼭 필요할 때만 만드세요. 필요 없으면 만들지 마세요.`,
+  `- 짧고 자연스러운 구어체로 쓰고, 한 문장에 질문을 두 개 넣지 마세요.`,
+  `- 내담자를 추궁하거나 판단하는 표현을 쓰지 마세요.`,
+  `- 이미 확인한 정보나 이미 한 질문을 다시 묻지 마세요.`,
+  `- 카드 해석을 실제 사실로 단정하는 질문을 하지 마세요.`,
+  `- 심리 분석을 위해 불필요하게 사적인 정보를 캐묻지 말고, 내담자의 원래 질문과 직접 관련된`,
+  `  질문을 우선하세요.`,
 ];
 
 function buildCallScriptPrompt(session: CallSession, spreadId: string, spreadName: string, cards: CallCardLine[]): string {
@@ -200,8 +252,8 @@ function buildCallScriptPrompt(session: CallSession, spreadId: string, spreadNam
   const guidance = CALL_SPREAD_GUIDANCE[spreadId];
 
   return [
-    `당신은 숙련된 타로 상담사가 전화 상담 중인 초보 상담사를 실시간으로 돕는 보조 도구입니다.`,
-    `상담사는 지금 실제 내담자와 전화 통화 중이며, 당신이 쓴 문장을 그대로 소리 내어 읽습니다.`,
+    `당신은 숙련된 타로 상담사가 전화 상담 중인 초보 상담사를 돕는 보조 도구입니다.`,
+    `상담사가 상담을 주도하고, 당신은 상담사가 참고하거나 그대로 소리 내어 읽을 문장을 제안합니다.`,
     ``,
     `내담자: ${session.session.querentName || "익명"}`,
     `날짜: ${session.session.date || "미상"}`,
@@ -216,39 +268,105 @@ function buildCallScriptPrompt(session: CallSession, spreadId: string, spreadNam
     `글자를 붙이지 마세요):`,
     ``,
     `===핵심결론===`,
-    `(전화로 15초 안에 말할 분량: 2~3문장, 공백 포함 80~100자 안팎. 첫 문장에서 질문에 대한`,
-    `답을 바로 말하세요. 인사나 배경 설명으로 시작하지 마세요. 과정에 어려움이 있다면 한 문장으로`,
-    `함께 언급하세요.)`,
+    `(전화로 15초 안에 말할 분량: 2~3문장, 공백 포함 80~100자 안팎. 첫 문장에서 내담자의 질문에`,
+    `직접 답하세요. 인사나 배경 설명으로 시작하지 마세요. 선택형 질문이면 각 선택지의 특징을`,
+    `비교하세요. 과정에 어려움이 있다면 한 문장으로 함께 언급하세요. 지나치게 모호하게 쓰지`,
+    `마세요.)`,
     `===상세설명===`,
-    `(1분 분량, 공백 포함 300~400자 안팎. 비중이 높은 자리를 중심으로 카드들 사이의 관계와`,
-    `흐름을 연결해서 설명하세요.)`,
-    `===질문===`,
-    `(상담사가 내담자에게 되물어서 상담을 더 구체적으로 만들 수 있는 질문 1~2개.)`,
+    `(1분 분량, 공백 포함 300~400자 안팎. 각 자리의 의미를 반영하고, 카드 간 관계와 과정→결과의`,
+    `연결을 중심으로 설명하세요.)`,
+    `===가이드유형===`,
+    `(다음 셋 중 하나만 그대로 쓰세요: 확인 질문 / 심화 질문 / 상담 마무리.`,
+    `상담 시작 직후에는 카드 해석과 실제 상황을 연결할 정보가 부족한 경우가 많으므로 보통`,
+    `"확인 질문"을 고르세요.)`,
+    `===가이드===`,
+    `(확인 질문·심화 질문이면 질문 한 문장만. 상담 마무리면 자연스러운 마무리 연결 멘트 1~2문장.)`,
     `===마무리===`,
     `(상담을 자연스럽게 마무리하는 멘트 1~2문장.)`,
-    `===해석근거===`,
-    `(왜 이렇게 해석했는지 설명하는 학습 노트. 상담사가 읽는 대본이 아니라 상담사 본인의`,
-    `학습용입니다. 어떤 자리의 어떤 카드를 중심축으로 삼았는지, 카드 간 관계를 어떻게`,
-    `읽었는지, 어려운 카드를 어떻게 다뤘는지 구체적으로 설명하세요.)`,
+    `===카드키워드===`,
+    `(카드별 핵심 키워드. 한 줄에 "자리: 카드 — 키워드" 형식)`,
+    `===위치근거===`,
+    `(각 자리의 역할에 비추어 왜 그렇게 읽었는지 한 줄씩)`,
+    `===카드관계===`,
+    `(카드끼리의 흐름·대비·충돌, 과정 카드와 결과 카드의 연결)`,
+    `===결론근거===`,
+    `(핵심결론이 어떤 자리·카드에서 나왔는지)`,
+    `===주의점===`,
+    `(이 해석을 쓸 때 조심할 점: 단정하면 안 되는 부분, 확인이 필요한 부분 등)`,
     ``,
     ...CALL_READING_RULES,
-    `- "핵심결론"/"상세설명"/"질문"/"마무리"는 상담사가 그대로 소리 내어 읽을 자연스러운`,
-    `  구어체(해요체)로 작성하세요. "해석근거"만 설명조로 써도 됩니다.`,
+    ...CALL_QUESTION_RULES,
+    `- "핵심결론"/"상세설명"/"가이드"/"마무리"는 상담사가 그대로 소리 내어 읽을 자연스러운`,
+    `  구어체(해요체)로 쓰세요. 카드키워드~주의점은 상담사만 보는 메모이므로 짧은 설명조로 쓰세요.`,
   ].join("\n");
 }
 
+const GUIDE_KIND_LABEL: Record<CallGuideKind, string> = {
+  confirm: "확인 질문",
+  deepen: "심화 질문",
+  close: "상담 마무리",
+};
+
+const NEXT_LABEL: Record<CallNext, string> = {
+  continue: "상담 계속",
+  "extra-card": "추가 카드 검토",
+  close: "상담 마무리 가능",
+};
+
+function parseGuideKind(text: string | undefined): CallGuideKind | undefined {
+  if (!text) return undefined;
+  if (text.includes("마무리")) return "close";
+  if (text.includes("심화")) return "deepen";
+  if (text.includes("확인")) return "confirm";
+  return undefined;
+}
+
+function parseNext(text: string | undefined): CallNext {
+  if (!text) return "continue";
+  if (text.includes("추가")) return "extra-card";
+  if (text.includes("마무리")) return "close";
+  return "continue";
+}
+
+function isNone(text: string | undefined): boolean {
+  return !text || /^(없음|해당\s*없음|없습니다|-)\.?$/.test(text.trim());
+}
+
+/** Keeps a single question: everything up to the first question mark. */
+function singleQuestion(text: string): string {
+  const t = text.trim();
+  const i = t.search(/[?？]/);
+  return i >= 0 ? t.slice(0, i + 1).trim() : t;
+}
+
 function serializeCallScript(script: CallScript): string {
+  const guide = script.guide ?? { kind: "confirm" as const, text: script.questionToAsk };
+  const notes = script.notes;
   return [
     `===핵심결론===`,
     script.coreConclusion,
     `===상세설명===`,
     script.detail,
-    `===질문===`,
-    script.questionToAsk,
+    `===가이드유형===`,
+    GUIDE_KIND_LABEL[guide.kind],
+    `===가이드===`,
+    guide.text || "없음",
     `===마무리===`,
     script.closing,
-    `===해석근거===`,
-    script.rationale,
+    ...(notes
+      ? [
+          `===카드키워드===`,
+          notes.keywords,
+          `===위치근거===`,
+          notes.positions,
+          `===카드관계===`,
+          notes.relations,
+          `===결론근거===`,
+          notes.basis,
+          `===주의점===`,
+          notes.cautions,
+        ]
+      : [`===결론근거===`, script.rationale]),
   ].join("\n");
 }
 
@@ -267,33 +385,78 @@ function parseSections<L extends string>(raw: string, labels: readonly L[]): Par
   return sections;
 }
 
-function parseCallScript(raw: string): CallScript {
+export function parseCallScript(raw: string): CallScript {
   const s = parseSections(raw, SCRIPT_LABELS);
   if (!s) {
     return { coreConclusion: "", detail: raw.trim(), questionToAsk: "", closing: "", rationale: "" };
   }
+
+  const kind = parseGuideKind(s["가이드유형"]) ?? (s["가이드"] ? "confirm" : undefined);
+  const rawGuide = s["가이드"] ?? s["질문"] ?? "";
+  const guideText = isNone(rawGuide) ? "" : kind === "close" ? rawGuide : singleQuestion(rawGuide);
+
+  const noteParts = {
+    keywords: s["카드키워드"] ?? "",
+    positions: s["위치근거"] ?? "",
+    relations: s["카드관계"] ?? "",
+    basis: s["결론근거"] ?? "",
+    cautions: s["주의점"] ?? "",
+  };
+  const hasNotes = Object.values(noteParts).some(Boolean);
+  const rationale = hasNotes
+    ? [
+        noteParts.keywords && `[카드별 키워드]\n${noteParts.keywords}`,
+        noteParts.positions && `[위치별 근거]\n${noteParts.positions}`,
+        noteParts.relations && `[카드 간 관계]\n${noteParts.relations}`,
+        noteParts.basis && `[결론 근거]\n${noteParts.basis}`,
+        noteParts.cautions && `[주의할 점]\n${noteParts.cautions}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n")
+    : (s["해석근거"] ?? "");
+
   return {
     coreConclusion: s["핵심결론"] ?? "",
     detail: s["상세설명"] ?? "",
-    questionToAsk: s["질문"] ?? "",
+    questionToAsk: guideText,
     closing: s["마무리"] ?? "",
-    rationale: s["해석근거"] ?? "",
+    rationale,
+    guide: kind && (guideText || kind === "close") ? { kind, text: guideText } : undefined,
+    notes: hasNotes ? noteParts : undefined,
   };
 }
 
-function isNone(text: string): boolean {
-  return /^(없음|해당\s*없음|없습니다)\.?$/.test(text.trim());
+function parseExtraCardSuggestion(text: string | undefined): ExtraCardSuggestion | undefined {
+  if (isNone(text)) return undefined;
+  const pick = (label: RegExp) => {
+    const line = text!.split("\n").find((l) => label.test(l));
+    return line ? line.replace(/^\s*(?:[-·•*]\s*)?[^:：]*[:：]\s*/, "").trim() : "";
+  };
+  const suggestion = {
+    purpose: pick(/목적/),
+    question: pick(/추천\s*질문|질문/),
+    count: pick(/카드\s*수|장\s*수/),
+    spread: pick(/스프레드|배열/),
+  };
+  return Object.values(suggestion).some(Boolean) ? suggestion : undefined;
 }
 
 export function parseCallReply(raw: string): CallReply {
   const s = parseSections(raw, REPLY_LABELS);
-  if (!s) return { answer: raw.trim(), rationale: "", revision: "", newFacts: [] };
+  if (!s) {
+    return { answer: raw.trim(), rationale: "", revision: "", newFacts: [], nextQuestion: "", next: "continue" };
+  }
 
   const revision = s["해석수정"] ?? "";
   const facts = s["새사실"] ?? "";
+  const rawQuestion = s["다음질문"] ?? "";
+  const nextQuestion = isNone(rawQuestion) ? "" : singleQuestion(rawQuestion);
+  const next = parseNext(s["다음진행"]);
+  const qKind = parseGuideKind(s["질문유형"]);
+
   return {
-    answer: s["답변"] ?? "",
-    rationale: s["근거"] ?? "",
+    answer: s["할말"] ?? s["답변"] ?? "",
+    rationale: s["참고메모"] ?? s["근거"] ?? "",
     revision: isNone(revision) ? "" : revision,
     newFacts: isNone(facts)
       ? []
@@ -301,18 +464,58 @@ export function parseCallReply(raw: string): CallReply {
           .split("\n")
           .map((line) => line.replace(/^\s*(?:[-·•*]|\d+[.)])\s*/, "").trim())
           .filter((line) => line && !isNone(line)),
+    nextQuestion,
+    nextQuestionKind: nextQuestion ? (qKind === "close" ? "confirm" : (qKind ?? "confirm")) : undefined,
+    next,
+    extraCardSuggestion: next === "extra-card" ? parseExtraCardSuggestion(s["추가카드"]) : undefined,
   };
 }
 
-/** Rebuilds the conversation so far (original script prompt + reply + prior live reactions),
- * so a new reaction or extra card draw is answered with full context. */
+export function parseCallClosing(raw: string): CallClosing {
+  const s = parseSections(raw, CLOSING_LABELS);
+  const clean = (t: string | undefined) => (isNone(t) ? "" : t!.trim());
+  if (!s) {
+    return { questionSummary: "", flow: "", confirmed: "", considerations: "", closingLine: raw.trim(), createdAt: new Date().toISOString() };
+  }
+  return {
+    questionSummary: clean(s["질문요약"]),
+    flow: clean(s["핵심흐름"]),
+    confirmed: clean(s["확인된정보"]),
+    considerations: clean(s["현실고려"]),
+    closingLine: clean(s["마무리멘트"]),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/** How the counselor's input for one turn is shown back to the model. */
+function describeTurn(r: CallReaction): string {
+  if (r.kind === "extra-card") return r.question;
+  if (r.tags || r.remark !== undefined) {
+    return [
+      `반응 유형(상담사가 고른 버튼): ${r.tags?.length ? r.tags.join(", ") : "없음"}`,
+      `내담자 발언 메모: ${r.remark ? `"${r.remark}"` : "없음"}`,
+    ].join("\n");
+  }
+  return r.question;
+}
+
 function serializeCallReaction(r: CallReaction): string {
-  const parts = [`===답변===`, r.answer];
-  if (r.rationale) parts.push(`===근거===`, r.rationale);
+  const parts = [`===할말===`, r.answer, `===다음질문===`, r.nextQuestion || "없음"];
+  if (r.rationale) parts.push(`===참고메모===`, r.rationale);
   if (r.revision) parts.push(`===해석수정===`, r.revision);
+  parts.push(`===다음진행===`, NEXT_LABEL[r.next ?? "continue"]);
   return parts.join("\n");
 }
 
+function clip(text: string, max: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+/**
+ * Rebuilds the conversation so far: the original reading, a short summary of older turns, and the
+ * most recent turns verbatim. Only this session's data is used.
+ */
 function buildCallConversationSoFar(
   session: CallSession,
   spread: ReturnType<typeof requireSpread>,
@@ -327,41 +530,107 @@ function buildCallConversationSoFar(
     { role: "assistant", content: serializeCallScript(session.script) },
   ];
 
-  for (const r of session.reactions ?? []) {
-    messages.push({ role: "user", content: r.question });
+  const reactions = session.reactions ?? [];
+  const older = reactions.slice(0, Math.max(0, reactions.length - RECENT_TURNS));
+  const recent = reactions.slice(older.length);
+
+  if (older.length > 0) {
+    messages.push({
+      role: "user",
+      content: [
+        `앞선 상담 내용 요약 (오래된 대화를 줄여서 정리한 것):`,
+        ...older.map((r) => {
+          const said = r.kind === "extra-card" ? r.question : (r.remark || r.tags?.join(", ") || r.question);
+          return `- ${r.kind === "extra-card" ? "추가 카드" : "내담자 측"}: ${clip(said, 60)} → 상담사가 한 말: ${clip(r.answer, 70)}${
+            r.nextQuestion ? ` (물어본 질문: ${r.nextQuestion})` : ""
+          }${r.revision ? ` [해석 수정: ${clip(r.revision, 50)}]` : ""}`;
+        }),
+      ].join("\n"),
+    });
+    messages.push({ role: "assistant", content: `네, 앞선 상담 내용을 참고해서 이어가겠습니다.` });
+  }
+
+  for (const r of recent) {
+    messages.push({ role: "user", content: describeTurn(r) });
     messages.push({ role: "assistant", content: serializeCallReaction(r) });
   }
 
   return messages;
 }
 
-function buildFactsBlock(facts: string[] | undefined): string {
-  if (!facts || facts.length === 0) return `상담 중 확인된 사실: 아직 없음`;
-  return [`상담 중 확인된 사실 (모두 사실로 유지하세요):`, ...facts.map((f) => `· ${f}`)].join("\n");
+function askedQuestions(session: CallSession): string[] {
+  const asked: string[] = [];
+  const guide = session.script?.guide;
+  if (guide && guide.kind !== "close" && guide.text) asked.push(guide.text);
+  else if (!guide && session.script?.questionToAsk) asked.push(session.script.questionToAsk);
+  for (const r of session.reactions ?? []) if (r.nextQuestion) asked.push(r.nextQuestion);
+  return asked;
+}
+
+function buildContextBlock(session: CallSession): string {
+  const facts = session.facts ?? [];
+  const asked = askedQuestions(session);
+  const extras = session.extraCards ?? [];
+  return [
+    `[상담 맥락]`,
+    `최초 상담 질문: ${session.session.question || "(질문 없음)"}`,
+    facts.length
+      ? [`내담자가 실제로 말해서 확인된 사실 (사실로 유지):`, ...facts.map((f) => `· ${f}`)].join("\n")
+      : `내담자가 실제로 말해서 확인된 사실: 아직 없음`,
+    asked.length
+      ? [`이미 한 질문 (다시 묻지 마세요):`, ...asked.map((q) => `· ${q}`)].join("\n")
+      : `이미 한 질문: 없음`,
+    extras.length
+      ? [`추가로 뽑은 카드:`, ...extras.map((x) => `· ${CARDS_BY_ID[x.cardId]?.nameKo ?? x.cardId} — ${x.label}`)].join("\n")
+      : `추가로 뽑은 카드: 없음`,
+    `주의: 앞선 AI 해석은 카드가 보여주는 가능성일 뿐 확정된 사실이 아니에요. 내담자의 실제 발언과`,
+    `맞지 않으면 해석을 조정하거나 불확실하다고 분명히 말하세요.`,
+  ].join("\n");
 }
 
 const CALL_REPLY_FORMAT = [
   `아래 형식으로 답해주세요. 구분자 줄은 그대로 쓰고, 앞뒤에 다른 글자를 붙이지 마세요.`,
   ``,
-  `===답변===`,
-  `(상담사가 바로 소리 내어 읽을 2~4문장, 해요체 구어체)`,
-  `===근거===`,
-  `(왜 이렇게 답했는지 1~2문장 학습 노트. 어떤 자리의 어떤 카드를 근거로 했는지.)`,
+  `===할말===`,
+  `(상담사가 지금 바로 소리 내어 읽을 2~3문장, 해요체 구어체. 내담자의 발언을 자연스럽게`,
+  `반영하고 기존 카드 해석과 연결하세요. 앞에서 한 설명을 반복하지 마세요.)`,
+  `===질문유형===`,
+  `(확인 질문 / 심화 질문 / 없음 중 하나. 해석과 실제 상황을 잇는 정보가 부족하면 확인 질문,`,
+  `내담자가 새 정보나 중요한 고민을 말했으면 심화 질문, 질문이 필요 없으면 없음)`,
+  `===다음질문===`,
+  `(꼭 필요할 때만 질문 한 문장. 필요 없으면 "없음")`,
+  `===참고메모===`,
+  `(상담사만 보는 메모 2~4줄: 이번 답과 관련된 카드, 기존 해석과 연결되는 부분, 수정하거나`,
+  `판단을 유보해야 하는 부분. 입력 정보가 부족하면 그 한계를 분명히 적으세요.)`,
   `===해석수정===`,
-  `(내담자의 새 발언이 앞선 해석과 맞지 않을 때만, 어떤 해석을 어떻게 고치는지 1~2문장.`,
-  `해당 없으면 "없음")`,
+  `(내담자의 실제 발언이 앞선 해석과 맞지 않을 때만, 어떤 해석을 어떻게 고치거나 유보하는지`,
+  `1~2문장. 해당 없으면 "없음")`,
   `===새사실===`,
-  `(이번 발언에서 새로 확인된 사실만 한 줄에 하나씩 짧게. 카드 해석이 아니라 내담자가 직접`,
-  `말한 사실만 적고, 이미 확인된 사실은 반복하지 마세요. 없으면 "없음")`,
+  `(내담자가 이번에 실제로 말한 사실만 한 줄에 하나씩 짧게. 반응 버튼만으로 사실을 만들지 말고,`,
+  `카드 해석이나 추측은 적지 마세요. 이미 확인된 사실은 반복하지 마세요. 없으면 "없음")`,
+  `===다음진행===`,
+  `(상담 계속 / 추가 카드 검토 / 상담 마무리 가능 중 하나. 상담사에게 주는 권고일 뿐입니다.)`,
+  `===추가카드===`,
+  `(다음진행이 "추가 카드 검토"일 때만 아래 네 줄, 아니면 "없음")`,
+  `목적: ...`,
+  `추천 질문: ...`,
+  `추천 카드 수: ...`,
+  `추천 스프레드: ...`,
+  ``,
+  `진행 판단 기준:`,
+  `- 추가 카드 검토는 기존 카드로 답하기 어려운 새 질문이 나왔을 때, 특정 선택의 조건이나`,
+  `  장애물을 더 구체적으로 봐야 할 때, 내담자가 확인하고 싶은 주제를 분명히 말했을 때만`,
+  `  권하세요. 기존 카드로 충분히 설명할 수 있거나, 같은 질문이 반복되거나, 상담 시간을`,
+  `  늘리기 위한 경우에는 권하지 마세요.`,
+  `- 원래 질문에 이미 충분히 답했거나 추가 질문의 필요성이 낮으면 "상담 마무리 가능"을 고르고,`,
+  `  질문을 억지로 만들지 마세요.`,
   ``,
   `답변 원칙:`,
-  `- 기본 흐름은 "공감 → 기존 카드와 연결 → 직접적인 답 또는 되묻는 질문"이지만, 매번 세`,
-  `  요소를 다 넣거나 같은 순서로 쓰지 마세요. 앞선 답변과 같은 도입부("그렇군요", "충분히`,
-  `  그럴 수 있어요" 등)를 반복하지 마세요.`,
-  `- 앞선 대화와 확인된 사실은 계속 유지하세요. 새 사실이 앞선 해석과 충돌하면 고집하지 말고`,
-  `  답변에서 자연스럽게 바로잡은 뒤 ===해석수정===에 기록하세요.`,
-  `- 지금 배열된 카드로 답하기 어려운 질문이면 억지로 해석하지 마세요. 그렇다고 솔직하게`,
-  `  말하고, 카드를 한 장 더 뽑아보거나 내담자에게 되물어보자고 제안하세요.`,
+  `- 공감 → 기존 카드와 연결 → 직접적인 답 또는 질문이 기본 흐름이지만, 매번 같은 틀이나 같은`,
+  `  도입부("그렇군요", "충분히 그럴 수 있어요" 등)를 반복하지 마세요.`,
+  `- 입력이 짧거나 반응 유형만 있으면, 구체적인 상황을 지어내지 말고 아는 만큼만 답하세요.`,
+  `- 지금 배열된 카드로 답하기 어려운 질문이면 억지로 해석하지 말고 그렇다고 솔직하게 말하세요.`,
+  ...CALL_QUESTION_RULES.slice(1),
   ...CALL_READING_RULES.slice(1),
 ].join("\n");
 
@@ -376,8 +645,18 @@ export async function requestCallScript(session: CallSession): Promise<CallScrip
   return parseCallScript(raw);
 }
 
-/** A client's live remark during the call; returns a 2~4 sentence reply plus study notes. */
-export async function requestCallFollowUp(session: CallSession, reaction: string): Promise<CallReply> {
+export interface CallTurnInput {
+  /** Quick reaction buttons the counselor tapped. They hint at the situation; they are not facts. */
+  tags: string[];
+  /** A short note of what the client said (keywords are fine). */
+  remark: string;
+}
+
+/** Suggests what the counselor says next, after the counselor logs the client's reaction. */
+export async function requestCallFollowUp(session: CallSession, input: CallTurnInput): Promise<CallReply> {
+  if (input.tags.length === 0 && !input.remark.trim()) {
+    throw new Error("반응 버튼을 고르거나 내담자 발언을 입력해주세요.");
+  }
   const spread = requireSpread(session.spreadId);
   const apiKey = requireApiKey();
   const cards = buildCallCardLines(session, spread);
@@ -386,9 +665,13 @@ export async function requestCallFollowUp(session: CallSession, reaction: string
   messages.push({
     role: "user",
     content: [
-      buildFactsBlock(session.facts),
+      buildContextBlock(session),
       ``,
-      `내담자가 통화 중 이렇게 말했어요: "${reaction}"`,
+      `[이번 상담사 입력]`,
+      `반응 유형(상담사가 고른 버튼 — 참고용이며 내담자의 상황을 확정하지 않음): ${
+        input.tags.length ? input.tags.join(", ") : "없음"
+      }`,
+      `내담자 발언 메모: ${input.remark.trim() ? `"${input.remark.trim()}"` : "없음 (버튼만 선택함)"}`,
       ``,
       CALL_REPLY_FORMAT,
     ].join("\n"),
@@ -397,7 +680,7 @@ export async function requestCallFollowUp(session: CallSession, reaction: string
   return parseCallReply(await runToCompletion(apiKey, messages));
 }
 
-/** Links a card drawn mid-call to the existing reading; returns a 2~4 sentence reply plus study notes. */
+/** Links a card drawn mid-call to the existing reading. */
 export async function requestExtraCardLink(session: CallSession, extraCard: CallExtraCard): Promise<CallReply> {
   const spread = requireSpread(session.spreadId);
   const apiKey = requireApiKey();
@@ -408,10 +691,11 @@ export async function requestExtraCardLink(session: CallSession, extraCard: Call
   messages.push({
     role: "user",
     content: [
-      buildFactsBlock(session.facts),
+      buildContextBlock(session),
       ``,
-      `상담 중 카드를 한 장 더 뽑았어요: ${card?.nameKo ?? "?"}`,
-      `뽑은 이유/질문: ${extraCard.label}`,
+      `[추가 카드]`,
+      `상담사가 카드를 한 장 더 뽑았어요: ${card?.nameKo ?? "?"}`,
+      `뽑은 목적/질문: ${extraCard.label}`,
       `이 카드는 "추가 카드" 자리입니다. 기존 배열의 자리·카드들과의 관계 속에서 이 질문에`,
       `답하되, 기존 해석을 뒤집기보다 보완하는 용도로 읽어주세요.`,
       ``,
@@ -420,4 +704,42 @@ export async function requestExtraCardLink(session: CallSession, extraCard: Call
   });
 
   return parseCallReply(await runToCompletion(apiKey, messages));
+}
+
+/** A 20~30 second wrap-up built only from what was already read and said in this call. */
+export async function requestCallClosing(session: CallSession): Promise<CallClosing> {
+  const spread = requireSpread(session.spreadId);
+  const apiKey = requireApiKey();
+  const cards = buildCallCardLines(session, spread);
+  const messages = buildCallConversationSoFar(session, spread, cards);
+
+  messages.push({
+    role: "user",
+    content: [
+      buildContextBlock(session),
+      ``,
+      `[상담 마무리]`,
+      `상담사가 상담을 마무리하려고 해요. 지금까지의 상담 내용만으로 마무리 대본을 써주세요.`,
+      `상담사가 아래 다섯 부분을 순서대로 이어서 읽으면 20~30초가 되도록, 전체를 공백 포함`,
+      `150~220자 안팎으로 맞춰주세요. 각 부분은 한 문장, 마무리멘트만 1~2문장입니다.`,
+      ``,
+      `===질문요약===`,
+      `(내담자의 최초 질문을 한 문장으로)`,
+      `===핵심흐름===`,
+      `(카드에서 나타난 핵심 흐름 한 문장)`,
+      `===확인된정보===`,
+      `(상담 중 내담자가 실제로 말해 확인된 중요한 정보 한 문장. 없으면 "없음")`,
+      `===현실고려===`,
+      `(현실적으로 고려할 점 한 문장)`,
+      `===마무리멘트===`,
+      `(자연스러운 마무리 인사 1~2문장)`,
+      ``,
+      `마무리 원칙:`,
+      `- 마무리 단계에서 새로운 해석이나 근거 없는 예측을 추가하지 마세요.`,
+      `- 카드가 보여준 가능성과 내담자가 실제로 말한 사실을 섞지 마세요.`,
+      `- 상담사가 그대로 읽을 수 있는 해요체 구어체로 쓰고, 마크다운은 쓰지 마세요.`,
+    ].join("\n"),
+  });
+
+  return parseCallClosing(await runToCompletion(apiKey, messages));
 }

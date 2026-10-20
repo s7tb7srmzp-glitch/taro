@@ -4,14 +4,25 @@ import { SpreadPicker } from "./SpreadPicker";
 import { SpreadBoard } from "./SpreadBoard";
 import { CardPickerPanel } from "./CardPickerPanel";
 import { CallScriptPanel } from "./CallScriptPanel";
-import { CallReactionThread } from "./CallReactionThread";
 import { CallExtraCardPicker } from "./CallExtraCardPicker";
 import { CallCardStrip } from "./CallCardStrip";
-import { CallScriptTabs } from "./CallScriptTabs";
+import { CallInterpretation } from "./CallInterpretation";
+import { CallGuide } from "./CallGuide";
+import { CallComposer } from "./CallComposer";
+import { CallFollowUp } from "./CallFollowUp";
+import { CallClosingPanel } from "./CallClosingPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { SPREADS_BY_ID } from "../data/spreads";
 import { CARDS_BY_ID } from "../data/cards";
-import type { CallExtraCard, CallReaction, CallReply, CallScript, CallSession, SessionInfo } from "../lib/types";
+import type {
+  CallClosing,
+  CallExtraCard,
+  CallReaction,
+  CallReply,
+  CallScript,
+  CallSession,
+  SessionInfo,
+} from "../lib/types";
 import {
   listCallSessions,
   saveCallSession,
@@ -19,7 +30,8 @@ import {
   exportCallSessionsJson,
   importCallSessionsJson,
 } from "../lib/callStorage";
-import { requestCallScript, requestCallFollowUp, requestExtraCardLink } from "../lib/ai";
+import { requestCallScript, requestCallFollowUp, requestExtraCardLink, requestCallClosing } from "../lib/ai";
+import type { CallTurnInput } from "../lib/ai";
 import { hasApiKey } from "../lib/settings";
 
 function todayIso(): string {
@@ -30,11 +42,6 @@ function newId(prefix: string): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-/** Rough spoken length for Korean at ~5 syllables per second. */
-function estimateSpeechSeconds(text: string): number {
-  return Math.max(1, Math.round(text.replace(/\s/g, "").length / 5));
 }
 
 function mergeFacts(existing: string[], incoming: string[]): string[] {
@@ -66,7 +73,14 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   const [reactions, setReactions] = useState<CallReaction[]>([]);
   const [extraCards, setExtraCards] = useState<CallExtraCard[]>([]);
   const [facts, setFacts] = useState<string[]>([]);
+  const [closing, setClosing] = useState<CallClosing | null>(null);
+  const [closingLoading, setClosingLoading] = useState(false);
+  const [closingError, setClosingError] = useState<string | null>(null);
+  const [extraRequest, setExtraRequest] = useState<{ label: string; nonce: number } | null>(null);
   const [confirmRegen, setConfirmRegen] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const followUpRef = useRef<HTMLElement>(null);
+  const closingRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -102,6 +116,12 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     return () => clearTimeout(timer);
   }, [confirmRegen]);
 
+  useEffect(() => {
+    if (!confirmLeave) return;
+    const timer = setTimeout(() => setConfirmLeave(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmLeave]);
+
   function handleCloseSettings() {
     setShowSettings(false);
     setApiKeyPresent(hasApiKey());
@@ -120,9 +140,20 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setReactions([]);
     setExtraCards([]);
     setFacts([]);
+    setClosing(null);
+    setClosingError(null);
+    setExtraRequest(null);
     setError(null);
     setSaved(false);
+    setConfirmLeave(false);
     setStep("setup");
+  }
+
+  /** Leaving drops anything unsaved, so an unsaved call in progress needs a second tap. */
+  function handleLeaveClick() {
+    const hasUnsaved = !saved && (!!script || Object.keys(placements).length > 0);
+    if (!hasUnsaved || confirmLeave) resetForNewCall();
+    else setConfirmLeave(true);
   }
 
   function openSession(s: CallSession) {
@@ -134,6 +165,9 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setReactions(s.reactions ?? []);
     setExtraCards(s.extraCards ?? []);
     setFacts(s.facts ?? []);
+    setClosing(s.closing ?? null);
+    setClosingError(null);
+    setExtraRequest(null);
     setError(null);
     setSaved(true);
     setStep("live");
@@ -151,6 +185,8 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     setReactions([]);
     setExtraCards([]);
     setFacts([]);
+    setClosing(null);
+    setClosingError(null);
     setSaved(false);
     setStep("live");
   }
@@ -187,6 +223,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       reactions,
       extraCards,
       facts,
+      closing: closing ?? undefined,
       createdAt: new Date().toISOString(),
     };
   }
@@ -200,6 +237,8 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       setScript(result);
       setReactions([]);
       setExtraCards([]);
+      setClosing(null);
+      setClosingError(null);
       setSaved(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "대본 생성 중 오류가 발생했어요.");
@@ -216,18 +255,53 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     }
   }
 
-  function recordReply(question: string, reply: CallReply, kind: CallReaction["kind"]) {
+  function scrollTo(el: HTMLElement | null) {
+    requestAnimationFrame(() => el?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+
+  function recordReply(turn: Omit<CallReaction, "answer">, reply: CallReply) {
     setReactions((prev) => [
       ...prev,
-      { question, answer: reply.answer, rationale: reply.rationale || undefined, revision: reply.revision || undefined, kind },
+      {
+        ...turn,
+        answer: reply.answer,
+        rationale: reply.rationale || undefined,
+        revision: reply.revision || undefined,
+        nextQuestion: reply.nextQuestion || undefined,
+        nextQuestionKind: reply.nextQuestionKind,
+        next: reply.next,
+        extraCardSuggestion: reply.extraCardSuggestion,
+      },
     ]);
     if (reply.newFacts.length > 0) setFacts((prev) => mergeFacts(prev, reply.newFacts));
     setSaved(false);
+    scrollTo(followUpRef.current);
   }
 
-  async function handleAskReaction(reaction: string) {
-    const reply = await requestCallFollowUp(buildSession(), reaction);
-    recordReply(reaction, reply, "reaction");
+  async function handleAskReaction(input: CallTurnInput) {
+    const reply = await requestCallFollowUp(buildSession(), input);
+    const question = [...input.tags.map((t) => `[${t}]`), input.remark].filter(Boolean).join(" ");
+    recordReply({ question, tags: input.tags, remark: input.remark, kind: "reaction" }, reply);
+  }
+
+  async function handleCloseCall() {
+    setClosingLoading(true);
+    setClosingError(null);
+    scrollTo(closingRef.current);
+    try {
+      const result = await requestCallClosing(buildSession());
+      setClosing(result);
+      setSaved(false);
+      scrollTo(closingRef.current);
+    } catch (e) {
+      setClosingError(e instanceof Error ? e.message : "마무리 대본 생성 중 오류가 발생했어요.");
+    } finally {
+      setClosingLoading(false);
+    }
+  }
+
+  function handleDrawExtra(label: string) {
+    setExtraRequest({ label, nonce: Date.now() });
   }
 
   async function handleAddExtraCard(cardId: string, label: string) {
@@ -235,7 +309,7 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
     const reply = await requestExtraCardLink(buildSession(), extraCard);
     setExtraCards((prev) => [...prev, { ...extraCard, note: reply.answer }]);
     const cardName = CARDS_BY_ID[cardId]?.nameKo ?? cardId;
-    recordReply(`[카드 추가] ${label} → ${cardName}`, reply, "extra-card");
+    recordReply({ question: `[카드 추가] ${label} → ${cardName}`, kind: "extra-card" }, reply);
   }
 
   function handleRemoveFact(index: number) {
@@ -284,8 +358,10 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
 
   const disclaimer = (
     <p className="call-disclaimer">
-      ⚠️ 이 모드는 상담사를 돕는 보조 도구입니다. 의료·법률·재정적 결정을 대신하지 않고, 제3자의
-      마음이나 미래를 단정하지 않습니다 — 항상 참고용으로만 활용하세요.
+      ⚠️ 이 모드는 상담사를 돕는 보조 도구예요. 상담은 상담사가 이끌고, AI는 필요할 때만 대본을
+      제안해요. 의료·법률·재정적 결정을 대신하지 않고, 제3자의 마음이나 미래를 단정하지 않아요.
+      카드 정보와 상담사가 입력한 내담자 발언은 대본 생성을 위해 외부 AI(Anthropic Claude API)로
+      전송되니, 실제 서비스에서는 내담자에게 이를 안내하고 동의를 받아주세요.
     </p>
   );
 
@@ -381,8 +457,12 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
   return (
     <div className="app-shell call-mode">
       <header className="app-header no-print">
-        <button type="button" className="btn btn--ghost" onClick={resetForNewCall}>
-          ‹ 처음으로
+        <button
+          type="button"
+          className={`btn btn--ghost${confirmLeave ? " call-actions__confirm" : ""}`}
+          onClick={handleLeaveClick}
+        >
+          {confirmLeave ? "저장 안 한 상담이 지워져요" : "‹ 처음으로"}
         </button>
         <h1>📞 전화상담 모드</h1>
         <div className="app-header__actions">
@@ -393,9 +473,10 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
       </header>
 
       <details className="call-disclaimer call-disclaimer--compact">
-        <summary>⚠️ 보조 도구 안내</summary>
-        의료·법률·재정적 결정을 대신하지 않고, 제3자의 마음이나 미래를 단정하지 않아요. 참고용으로만
-        활용하세요.
+        <summary>⚠️ 보조 도구 · 개인정보 안내</summary>
+        의료·법률·재정적 결정을 대신하지 않고, 제3자의 마음이나 미래를 단정하지 않아요. 카드 정보와
+        입력한 내담자 발언은 대본 생성을 위해 외부 AI(Anthropic Claude API)로 전송돼요. 이름·연락처 등
+        민감한 정보는 입력하지 마세요.
       </details>
 
       <p className="call-summary">
@@ -429,25 +510,35 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
             />
           )}
 
-          <section className="call-core">
-            <div className="call-core__head">
-              <h3>📣 15초 핵심 결론</h3>
-              {script.coreConclusion && (
-                <span
-                  className={`call-core__badge${
-                    estimateSpeechSeconds(script.coreConclusion) > 18 ? " call-core__badge--long" : ""
-                  }`}
-                >
-                  약 {estimateSpeechSeconds(script.coreConclusion)}초
-                </span>
-              )}
-            </div>
-            <p>{script.coreConclusion || "핵심 결론이 비어 있어요. 아래 '상담 대본' 탭을 확인하거나 대본을 다시 생성해주세요."}</p>
+          <section className="call-zone" aria-label="카드 해석">
+            <CallInterpretation script={script} reactions={reactions} facts={facts} onRemoveFact={handleRemoveFact} />
           </section>
 
-          <CallReactionThread reactions={reactions} onAsk={handleAskReaction} />
+          <section className="call-zone" aria-label="상담 진행">
+            <h2 className="call-zone__title">상담 진행</h2>
+            <CallGuide script={script} reactions={reactions} onCloseCall={handleCloseCall} />
+            <CallComposer onGenerate={handleAskReaction} disabled={loading || closingLoading} />
+          </section>
 
-          <CallScriptTabs script={script} reactions={reactions} facts={facts} onRemoveFact={handleRemoveFact} />
+          <section className="call-zone" aria-label="후속 상담" ref={followUpRef}>
+            <h2 className="call-zone__title">후속 상담</h2>
+            {reactions.length === 0 ? (
+              <p className="call-zone__empty">
+                내담자 반응을 입력하고 "다음 상담 대본 생성"을 누르면 여기에 할 말과 다음 질문이 나와요.
+              </p>
+            ) : (
+              <CallFollowUp reactions={reactions} onDrawExtra={handleDrawExtra} />
+            )}
+            <div className="call-actions no-print">
+              <CallExtraCardPicker usedCardIds={usedCardIds} onAdd={handleAddExtraCard} request={extraRequest} />
+              <button type="button" className="btn" onClick={handleCloseCall} disabled={closingLoading}>
+                {closingLoading ? "마무리 대본 만드는 중…" : closing ? "마무리 대본 다시 만들기" : "👋 상담 마무리"}
+              </button>
+            </div>
+            <div ref={closingRef}>
+              <CallClosingPanel closing={closing} loading={closingLoading} error={closingError} onGenerate={handleCloseCall} />
+            </div>
+          </section>
 
           {loading && (
             <div className="call-loading" role="status">
@@ -465,19 +556,23 @@ export function CallConsultant({ onExit }: CallConsultantProps) {
           )}
 
           <div className="call-actions no-print">
-            <CallExtraCardPicker usedCardIds={usedCardIds} onAdd={handleAddExtraCard} />
             <button
               type="button"
               className={`btn${confirmRegen ? " call-actions__confirm" : ""}`}
               onClick={handleRegenerateClick}
               disabled={loading || !canGenerate}
             >
-              {loading ? "생성 중…" : confirmRegen ? "한 번 더 누르면 대화가 초기화돼요" : "대본 다시 생성"}
+              {loading ? "생성 중…" : confirmRegen ? "한 번 더 누르면 대화가 초기화돼요" : "최초 해석 다시 생성"}
             </button>
             <button type="button" className="btn" onClick={handleSave}>
               {saved ? "저장됨 ✓" : "저장"}
             </button>
           </div>
+          <p className="call-save-note no-print">
+            {saved
+              ? "이 기기의 브라우저에만 저장됐어요. 이후 바뀐 내용은 다시 저장해야 남아요."
+              : "저장하지 않으면 '처음으로'를 누를 때 이 상담 내용(입력한 발언 포함)은 사라져요. 저장하면 이 기기에만 보관돼요."}
+          </p>
         </>
       )}
 

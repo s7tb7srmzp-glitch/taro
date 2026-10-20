@@ -36,6 +36,46 @@ export interface CallScript {
   closing: string;
   /** Why it was interpreted this way — study notes, not meant to be read aloud. */
   rationale: string;
+  /** What the counselor should do next. Absent on scripts saved before this existed. */
+  guide?: CallGuide;
+  /** Structured study notes. Absent on scripts saved before this existed (use `rationale`). */
+  notes?: CallNotes;
+}
+
+/** "확인 질문" | "심화 질문" | "상담 마무리" */
+export type CallGuideKind = "confirm" | "deepen" | "close";
+
+export interface CallGuide {
+  kind: CallGuideKind;
+  text: string;
+}
+
+export interface CallNotes {
+  keywords: string;
+  positions: string;
+  relations: string;
+  basis: string;
+  cautions: string;
+}
+
+/** AI's recommendation for the counselor; the counselor decides. */
+export type CallNext = "continue" | "extra-card" | "close";
+
+export interface ExtraCardSuggestion {
+  purpose: string;
+  question: string;
+  count: string;
+  spread: string;
+}
+
+/** The 20~30 second wrap-up generated when the counselor ends the call. */
+export interface CallClosing {
+  questionSummary: string;
+  flow: string;
+  confirmed: string;
+  considerations: string;
+  closingLine: string;
+  createdAt: string;
 }
 
 /** A card drawn mid-call outside the original spread, linked back to the existing reading. */
@@ -55,6 +95,15 @@ export interface CallReaction extends FollowUp {
   /** Present when the reply corrects an earlier interpretation in light of new facts. */
   revision?: string;
   kind?: "reaction" | "extra-card";
+  /** Quick reaction buttons the counselor tapped (e.g. "해석 불일치"). */
+  tags?: string[];
+  /** What the counselor typed about the client's remark, without the tags. */
+  remark?: string;
+  /** At most one follow-up question; absent when no question is needed. */
+  nextQuestion?: string;
+  nextQuestionKind?: CallGuideKind;
+  next?: CallNext;
+  extraCardSuggestion?: ExtraCardSuggestion;
 }
 
 export interface CallSession {
@@ -69,12 +118,19 @@ export interface CallSession {
   extraCards?: CallExtraCard[];
   /** Facts the client confirmed during the call, carried into every later reply. */
   facts?: string[];
+  closing?: CallClosing;
   createdAt: string;
 }
 
 export interface CallReply {
+  /** What the counselor says now (2~3 sentences). */
   answer: string;
+  /** Counselor memo: related cards, links to the reading, what to revise or hold back, info limits. */
   rationale: string;
   revision: string;
   newFacts: string[];
+  nextQuestion: string;
+  nextQuestionKind?: CallGuideKind;
+  next: CallNext;
+  extraCardSuggestion?: ExtraCardSuggestion;
 }
