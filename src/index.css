@@ -495,7 +495,8 @@ h2 {
   padding-bottom: 6px;
 }
 
-/* Pip cards: 10 per suit, shown as 5 x 2 (fewer columns only on very narrow screens). */
+/* Major and pip cards share one 5-column grid, so every card tab shows cards at the same size. */
+.card-picker__grid--major,
 .card-picker__grid--pip {
   grid-template-columns: repeat(5, minmax(0, 1fr));
   max-width: 640px;
@@ -503,36 +504,34 @@ h2 {
   margin: 0 auto;
 }
 
-/* Court cards: 4 per suit, one suit per row. */
+/* Court cards: one suit per row (4 cards), each as wide as a card in the 5-column grids. */
 .card-picker__grid--court {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  max-width: 560px;
+  --picker-gap: 8px;
+  grid-template-columns: repeat(4, calc((100% - 4 * var(--picker-gap)) / 5));
+  justify-content: center;
+  max-width: 640px;
   width: 100%;
   margin: 0 auto;
 }
 
-.card-picker__grid--major {
-  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
-}
-
 @media (max-width: 340px) {
+  .card-picker__grid--major,
   .card-picker__grid--pip {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .card-picker__grid--court {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, calc((100% - 3 * var(--picker-gap)) / 4));
   }
 }
 
 @media (min-width: 800px) {
-  .card-picker__grid--major {
-    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  .card-picker__grid {
     gap: 12px;
   }
 
-  .card-picker__grid {
-    gap: 12px;
+  .card-picker__grid--court {
+    --picker-gap: 12px;
   }
 }
 
